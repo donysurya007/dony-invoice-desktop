@@ -38,6 +38,7 @@
   "plugins": {
     "sql": {
       "preload": [
+        "sqlite:dony_invoice.db",
         "sqlite:nadhi_invoice.db"
       ]
     }

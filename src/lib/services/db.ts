@@ -5,8 +5,11 @@ import type { ClientDraft, ClientRecord, CompanySettings, DashboardSummary, Docu
 import { calculateSubtotal, calculateTotal } from '$lib/utils/format';
 import { createKey } from '$lib/utils/id';
 
-const dbUrl = 'sqlite:nadhi_invoice.db';
+const dbUrl = 'sqlite:dony_invoice.db';
+const legacyDbUrl = 'sqlite:nadhi_invoice.db';
+
 let dbPromise: Promise<Database> | null = null;
+let legacyDbPromise: Promise<Database> | null = null;
 
 function connect(): Promise<Database> {
   if (!dbPromise) {
@@ -16,7 +19,20 @@ function connect(): Promise<Database> {
   return dbPromise;
 }
 
+function connectLegacy(): Promise<Database> {
+  if (!legacyDbPromise) {
+    legacyDbPromise = Database.load(legacyDbUrl);
+  }
+
+  return legacyDbPromise;
+}
+
 type SettingsRow = {
+  value: string;
+};
+
+type SettingsMigrationRow = {
+  key: string;
   value: string;
 };
 
@@ -121,8 +137,7 @@ function mapClient(row: ClientRow): ClientRecord {
   };
 }
 
-async function ensureDocumentClientColumn(): Promise<void> {
-  const db = await connect();
+async function ensureDocumentClientColumn(db: Database): Promise<void> {
   const columns = await db.select<ColumnRow[]>('PRAGMA table_info(documents)');
   const hasClientId = columns.some((column) => column.name === 'client_id');
 
@@ -132,11 +147,16 @@ async function ensureDocumentClientColumn(): Promise<void> {
   }
 }
 
+async function tableExists(db: Database, tableName: string): Promise<boolean> {
+  const tables = await db.select<TableRow[]>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [tableName]);
+
+  return tables.length > 0;
+}
+
 async function migrateInvoices(): Promise<void> {
   const db = await connect();
-  const tables = await db.select<TableRow[]>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", ['invoices']);
 
-  if (tables.length === 0) return;
+  if (!(await tableExists(db, 'invoices'))) return;
 
   const rows = await db.select<CountRow[]>('SELECT COUNT(*) AS total FROM documents');
   const documentCount = Number(rows[0]?.total || 0);
@@ -150,6 +170,118 @@ async function migrateInvoices(): Promise<void> {
     id, 'invoice', invoice_number, issue_date, due_date, payment_method, '', customer_name, customer_detail,
     service_note, tax, subtotal, total, status, items_json, created_at, updated_at
   FROM invoices`);
+}
+
+async function getTableColumns(db: Database, tableName: string): Promise<string[]> {
+  const columns = await db.select<ColumnRow[]>(`PRAGMA table_info(${tableName})`);
+
+  return columns.map((column) => column.name);
+}
+
+async function migrateSettingsFromLegacy(currentDb: Database, legacyDb: Database): Promise<void> {
+  if (!(await tableExists(legacyDb, 'settings'))) return;
+
+  const rows = await legacyDb.select<SettingsMigrationRow[]>('SELECT key, value FROM settings');
+
+  for (const row of rows) {
+    await currentDb.execute('INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)', [row.key, row.value]);
+  }
+}
+
+async function migrateClientsFromLegacy(currentDb: Database, legacyDb: Database): Promise<void> {
+  if (!(await tableExists(legacyDb, 'clients'))) return;
+
+  const rows = await legacyDb.select<ClientRow[]>('SELECT id, name, detail, address, phone, email, created_at, updated_at FROM clients');
+
+  for (const row of rows) {
+    await currentDb.execute(
+      `INSERT OR IGNORE INTO clients(id, name, detail, address, phone, email, created_at, updated_at)
+      VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+      [row.id, row.name, row.detail, row.address, row.phone, row.email, row.created_at, row.updated_at]
+    );
+  }
+}
+
+async function migrateDocumentsFromLegacy(currentDb: Database, legacyDb: Database): Promise<void> {
+  if (await tableExists(legacyDb, 'documents')) {
+    const columns = await getTableColumns(legacyDb, 'documents');
+    const clientColumn = columns.includes('client_id') ? 'client_id' : "'' AS client_id";
+    const rows = await legacyDb.select<DocumentRow[]>(`SELECT
+      id, document_type, document_number, issue_date, due_date, payment_method, ${clientColumn}, customer_name, customer_detail,
+      service_note, tax, subtotal, total, status, items_json, created_at, updated_at
+    FROM documents`);
+
+    for (const row of rows) {
+      await currentDb.execute(
+        `INSERT OR IGNORE INTO documents(
+          id, document_type, document_number, issue_date, due_date, payment_method, client_id, customer_name, customer_detail,
+          service_note, tax, subtotal, total, status, items_json, created_at, updated_at
+        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          row.id,
+          row.document_type,
+          row.document_number,
+          row.issue_date,
+          row.due_date,
+          row.payment_method,
+          row.client_id || '',
+          row.customer_name,
+          row.customer_detail,
+          row.service_note,
+          row.tax,
+          row.subtotal,
+          row.total,
+          row.status,
+          row.items_json,
+          row.created_at,
+          row.updated_at
+        ]
+      );
+    }
+  }
+
+  if (!(await tableExists(legacyDb, 'invoices'))) return;
+
+  const rows = await legacyDb.select<DocumentRow[]>(`SELECT
+    id, 'invoice' AS document_type, invoice_number AS document_number, issue_date, due_date, payment_method, '' AS client_id,
+    customer_name, customer_detail, service_note, tax, subtotal, total, status, items_json, created_at, updated_at
+  FROM invoices`);
+
+  for (const row of rows) {
+    await currentDb.execute(
+      `INSERT OR IGNORE INTO documents(
+        id, document_type, document_number, issue_date, due_date, payment_method, client_id, customer_name, customer_detail,
+        service_note, tax, subtotal, total, status, items_json, created_at, updated_at
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.id,
+        row.document_type,
+        row.document_number,
+        row.issue_date,
+        row.due_date,
+        row.payment_method,
+        row.client_id || '',
+        row.customer_name,
+        row.customer_detail,
+        row.service_note,
+        row.tax,
+        row.subtotal,
+        row.total,
+        row.status,
+        row.items_json,
+        row.created_at,
+        row.updated_at
+      ]
+    );
+  }
+}
+
+async function migrateLegacyDatabase(currentDb: Database): Promise<void> {
+  const legacyDb = await connectLegacy();
+
+  await migrateSettingsFromLegacy(currentDb, legacyDb);
+  await migrateClientsFromLegacy(currentDb, legacyDb);
+  await migrateDocumentsFromLegacy(currentDb, legacyDb);
 }
 
 export async function initDatabase(): Promise<void> {
@@ -192,13 +324,14 @@ export async function initDatabase(): Promise<void> {
     updated_at TEXT NOT NULL
   )`);
 
-  await ensureDocumentClientColumn();
+  await ensureDocumentClientColumn(db);
   await db.execute('CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)');
   await db.execute('CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(document_type)');
   await db.execute('CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)');
   await db.execute('CREATE INDEX IF NOT EXISTS idx_documents_client_id ON documents(client_id)');
   await db.execute('CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name)');
 
+  await migrateLegacyDatabase(db);
   await migrateInvoices();
 
   const rows = await db.select<SettingsRow[]>('SELECT value FROM settings WHERE key = ?', ['company']);
