@@ -1,0 +1,7 @@
+node_modules
+build
+.svelte-kit
+src-tauri/target
+src-tauri/Cargo.lock
+.DS_Store
+*.log

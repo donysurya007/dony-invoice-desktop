@@ -1,0 +1,24 @@
+[package]
+name = "dony_invoice"
+version = "1.0.0"
+description = "Dony Invoice Desktop"
+authors = ["Dony Surya"]
+edition = "2021"
+
+[lib]
+name = "dony_invoice_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "dony_invoice"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rfd = "0.15"
