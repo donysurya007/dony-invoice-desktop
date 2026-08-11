@@ -151,7 +151,11 @@
 
                 <div class="scope-lines">
                   {#each section.lines as line (line.lineKey)}
-                    <p class:scope-line-heading={line.kind === 'heading'} class:scope-line-bullet={line.kind === 'bullet'}>
+                    <p
+                      class:scope-line-heading={line.kind === 'heading'}
+                      class:scope-line-bullet={line.kind === 'bullet'}
+                      class:scope-line-nested={line.indentLevel > 1}
+                    >
                       {#if line.marker}
                         <span class="scope-line-marker">{line.marker}</span>
                       {:else}

@@ -2633,3 +2633,30 @@ label span {
     font-size: 10px !important;
   }
 }
+
+.scope-lines p.scope-line-bullet {
+  grid-template-columns: 16px minmax(0, 1fr);
+  margin-left: 28px;
+  color: #52616c;
+}
+
+.scope-lines p.scope-line-bullet .scope-line-marker {
+  color: var(--doc-accent, var(--orange));
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.scope-lines p.scope-line-nested {
+  margin-left: 44px;
+}
+
+@media print {
+  .scope-lines p.scope-line-bullet {
+    grid-template-columns: 16px minmax(0, 1fr) !important;
+    margin-left: 28px !important;
+  }
+
+  .scope-lines p.scope-line-nested {
+    margin-left: 44px !important;
+  }
+}

@@ -371,16 +371,19 @@ function drawScopeSection(page: PDFPage, context: PdfContext, section: Paginated
 
   section.lines.forEach((line) => {
     const isHeading = line.kind === 'heading';
+    const isBullet = line.kind === 'bullet';
     const font = isHeading ? context.fonts.bold : context.fonts.regular;
     const color = isHeading ? black : gray;
     const size = isHeading ? 7.7 : 7.2;
-    const markerWidth = px(30);
+    const indent = isBullet ? px(24 + Math.max(0, line.indentLevel - 1) * 16) : px(line.indentLevel * 16);
+    const markerX = contentX + indent;
+    const markerWidth = isBullet ? px(16) : px(30);
 
     if (line.marker) {
-      drawText(page, line.marker, contentX, yTop(lineTop), size, font, color);
+      drawText(page, line.marker, markerX, yTop(lineTop), size, font, isBullet ? context.accent : color);
     }
 
-    drawText(page, line.text, contentX + markerWidth, yTop(lineTop), size, font, color);
+    drawText(page, line.text, markerX + markerWidth, yTop(lineTop), size, font, color);
     lineTop += line.lineHeight;
   });
 

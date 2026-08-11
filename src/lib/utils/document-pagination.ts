@@ -10,6 +10,7 @@ export type PaginatedScopeLine = {
   marker: string;
   text: string;
   kind: ScopeLineKind;
+  indentLevel: number;
   lineHeight: number;
 };
 
@@ -116,21 +117,23 @@ function splitWords(value: string, charsPerLine: number): string[] {
   return lines;
 }
 
-function parseScopeLine(value: string): { marker: string; text: string; kind: ScopeLineKind } {
-  const clean = value.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+function parseScopeLine(value: string): { marker: string; text: string; kind: ScopeLineKind; indentLevel: number } {
+  const normalized = value.replace(/\u00a0/g, ' ').replace(/\t/g, '  ');
+  const leadingSpaces = normalized.match(/^ */)?.[0].length || 0;
+  const clean = normalized.replace(/\s+/g, ' ').trim();
   const numbered = clean.match(/^(\d+\.)\s+(.*)$/);
 
   if (numbered) {
-    return { marker: numbered[1], text: numbered[2], kind: 'heading' };
+    return { marker: numbered[1], text: numbered[2], kind: 'heading', indentLevel: 0 };
   }
 
   const bullet = clean.match(/^[•*-]\s+(.*)$/);
 
   if (bullet) {
-    return { marker: '•', text: bullet[1], kind: 'bullet' };
+    return { marker: '•', text: bullet[1], kind: 'bullet', indentLevel: Math.max(1, Math.ceil(leadingSpaces / 2)) };
   }
 
-  return { marker: '', text: clean, kind: 'body' };
+  return { marker: '', text: clean, kind: 'body', indentLevel: Math.ceil(leadingSpaces / 2) };
 }
 
 function wrapScopeLines(item: DocumentItem): PaginatedScopeLine[] {
@@ -142,7 +145,8 @@ function wrapScopeLines(item: DocumentItem): PaginatedScopeLine[] {
   for (const logicalLine of source) {
     const parsed = parseScopeLine(logicalLine);
     const markerAllowance = parsed.marker ? parsed.marker.length + 2 : 0;
-    const wrapped = splitWords(parsed.text, Math.max(42, documentLayout.scopeChars - markerAllowance));
+    const indentAllowance = parsed.indentLevel * 4;
+    const wrapped = splitWords(parsed.text, Math.max(42, documentLayout.scopeChars - markerAllowance - indentAllowance));
     const lines = wrapped.length > 0 ? wrapped : [''];
 
     lines.forEach((text, wrappedIndex) => {
@@ -151,6 +155,7 @@ function wrapScopeLines(item: DocumentItem): PaginatedScopeLine[] {
         marker: wrappedIndex === 0 ? parsed.marker : '',
         text,
         kind: parsed.kind,
+        indentLevel: parsed.indentLevel,
         lineHeight: parsed.kind === 'heading' ? documentLayout.scopeHeadingLineHeight : documentLayout.scopeLineHeight
       });
       lineIndex += 1;
