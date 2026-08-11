@@ -4,10 +4,17 @@ export type DocumentType = 'offer' | 'invoice' | 'receipt';
 
 export type DocumentStatus = 'draft' | 'approved' | 'paid' | 'cancelled';
 
+export type DocumentLanguage = 'id' | 'en';
+
+export type DocumentItemUnit = 'qty' | 'mandays';
+
 export type CompanySettings = {
+  appLanguage: DocumentLanguage;
   name: string;
   subtitle: string;
+  subtitleEn: string;
   businessDescription: string;
+  businessDescriptionEn: string;
   address: string;
   phone: string;
   email: string;
@@ -16,11 +23,16 @@ export type CompanySettings = {
   bankAccountHolder: string;
   signerName: string;
   signerRole: string;
+  signerRoleEn: string;
   city: string;
+  defaultDocumentLanguage: DocumentLanguage;
   defaultNote: string;
   defaultOfferNote: string;
   defaultInvoiceNote: string;
   defaultReceiptNote: string;
+  defaultOfferNoteEn: string;
+  defaultInvoiceNoteEn: string;
+  defaultReceiptNoteEn: string;
   offerColor: string;
   invoiceColor: string;
   receiptColor: string;
@@ -30,6 +42,7 @@ export type CompanySettings = {
 
 export type ClientDraft = {
   name: string;
+  companyName: string;
   detail: string;
   address: string;
   phone: string;
@@ -47,17 +60,20 @@ export type DocumentItem = {
   description: string;
   note: string;
   quantity: number;
+  unit: DocumentItemUnit;
   unitPrice: number;
 };
 
 export type DocumentDraft = {
   documentType: DocumentType;
+  language: DocumentLanguage;
   documentNumber: string;
   issueDate: string;
   dueDate: string;
   paymentMethod: PaymentMethod;
   clientId: string;
   customerName: string;
+  customerCompany: string;
   customerDetail: string;
   serviceNote: string;
   tax: number;
@@ -83,4 +99,17 @@ export type DashboardSummary = {
 export type ToastMessage = {
   message: string;
   type: 'success' | 'error' | 'info';
+};
+
+export type InvoiceDraft = Omit<DocumentDraft, 'documentType' | 'documentNumber' | 'language' | 'clientId' | 'customerCompany'> & {
+  invoiceNumber: string;
+};
+
+export type InvoiceRecord = InvoiceDraft & {
+  id: string;
+  subtotal: number;
+  total: number;
+  status: DocumentStatus;
+  createdAt: string;
+  updatedAt: string;
 };

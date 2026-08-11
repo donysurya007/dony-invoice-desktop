@@ -1,4 +1,4 @@
-import type { DocumentItem } from '$lib/types';
+import type { DocumentItem, DocumentLanguage } from '$lib/types';
 
 export function toDateInputValue(date: Date): string {
   const year = date.getFullYear();
@@ -15,16 +15,20 @@ export function addDays(value: string, amount: number): string {
   return toDateInputValue(date);
 }
 
-export function formatDateIndonesia(value: string): string {
+export function formatDocumentDate(value: string, language: DocumentLanguage): string {
   if (!value) return '-';
 
   const date = new Date(`${value}T00:00:00`);
 
-  return new Intl.DateTimeFormat('id-ID', {
+  return new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : 'id-ID', {
     day: '2-digit',
     month: 'long',
     year: 'numeric'
   }).format(date);
+}
+
+export function formatDateIndonesia(value: string): string {
+  return formatDocumentDate(value, 'id');
 }
 
 export function formatCurrency(value: number): string {

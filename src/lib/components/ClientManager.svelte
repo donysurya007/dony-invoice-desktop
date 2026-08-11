@@ -2,10 +2,11 @@
   import { createEventDispatcher } from 'svelte';
   import AppButton from './AppButton.svelte';
   import AppCard from './AppCard.svelte';
-  import type { ClientDraft, ClientRecord } from '$lib/types';
+  import type { ClientDraft, ClientRecord, DocumentLanguage } from '$lib/types';
 
   export let clients: ClientRecord[] = [];
   export let saving = false;
+  export let language: DocumentLanguage = 'id';
 
   const dispatch = createEventDispatcher<{
     save: { id: string | null; draft: ClientDraft };
@@ -15,9 +16,12 @@
   let editingId: string | null = null;
   let draft: ClientDraft = createEmptyDraft();
 
+  $: isEnglish = language === 'en';
+
   function createEmptyDraft(): ClientDraft {
     return {
       name: '',
+      companyName: '',
       detail: '',
       address: '',
       phone: '',
@@ -29,6 +33,7 @@
     editingId = client.id;
     draft = {
       name: client.name,
+      companyName: client.companyName,
       detail: client.detail,
       address: client.address,
       phone: client.phone,
@@ -48,60 +53,86 @@
   function deleteClient(client: ClientRecord): void {
     dispatch('delete', client);
   }
+
+  function getClientHeading(client: ClientRecord): string {
+    return client.name;
+  }
+
+  function getClientSubheading(client: ClientRecord): string {
+    if (client.companyName) return client.companyName;
+
+    return client.detail || client.address || '-';
+  }
+
+  function getClientMeta(client: ClientRecord): string {
+    return [client.detail, client.address, client.phone, client.email].filter(Boolean).join(' · ') || '-';
+  }
 </script>
 
-<AppCard title="Data Klien" description="Simpan klien agar penawaran, invoice, dan kwitansi tidak perlu diketik ulang.">
-  <div class="form-grid two">
-    <label>
-      <span>Nama Klien</span>
-      <input bind:value={draft.name} />
-    </label>
-
-    <label>
-      <span>Keterangan Klien</span>
-      <input bind:value={draft.detail} />
-    </label>
-
-    <label>
-      <span>Alamat</span>
-      <input bind:value={draft.address} />
-    </label>
-
-    <label>
-      <span>Telepon</span>
-      <input bind:value={draft.phone} />
-    </label>
-
-    <label class="full-field">
-      <span>Email</span>
-      <input bind:value={draft.email} />
-    </label>
-  </div>
-
-  <div class="action-row">
-    <AppButton variant="ghost" on:click={reset}>Klien Baru</AppButton>
-    <AppButton disabled={saving} on:click={save}>{saving ? 'Menyimpan...' : editingId ? 'Update Klien' : 'Simpan Klien'}</AppButton>
-  </div>
-</AppCard>
-
-<AppCard title="List Klien" description="Klik klien untuk mengedit data yang tersimpan.">
-  {#if clients.length === 0}
-    <div class="empty-state small">
-      <strong>Belum ada klien</strong>
-      <p>Klien yang disimpan akan tampil di sini.</p>
+<div class="client-manager-grid">
+  <AppCard title={editingId ? (isEnglish ? 'Edit Client' : 'Edit Klien') : (isEnglish ? 'New Client' : 'Klien Baru')} description={isEnglish ? 'The client name is the primary recipient. The company name is stored separately.' : 'Nama klien adalah penerima utama. Nama perusahaan disimpan terpisah.'}>
+    <div class="client-form-highlight">
+      <strong>{isEnglish ? 'Recipient identity' : 'Identitas penerima'}</strong>
+      <span>{isEnglish ? 'Do not replace the client name with the company name.' : 'Nama klien tidak digantikan dengan nama perusahaan.'}</span>
     </div>
-  {:else}
-    <div class="client-list">
-      {#each clients as client (client.id)}
-        <article class="client-item">
-          <button type="button" on:click={() => editClient(client)}>
-            <strong>{client.name}</strong>
-            <span>{client.detail || client.address || '-'}</span>
-            <small>{client.phone || client.email || '-'}</small>
-          </button>
-          <AppButton variant="danger" on:click={() => deleteClient(client)}>Hapus</AppButton>
-        </article>
-      {/each}
+
+    <div class="form-grid two">
+      <label>
+        <span>{isEnglish ? 'Client Name' : 'Nama Klien'}</span>
+        <input bind:value={draft.name} placeholder={isEnglish ? 'Example: Mr. Alain' : 'Contoh: Mr. Alain'} />
+      </label>
+
+      <label>
+        <span>{isEnglish ? 'Client Company Name' : 'Nama Perusahaan Klien'}</span>
+        <input bind:value={draft.companyName} placeholder={isEnglish ? 'Example: Bali Kennel' : 'Contoh: Bali Kennel'} />
+      </label>
+
+      <label>
+        <span>{isEnglish ? 'Client Details' : 'Keterangan Klien'}</span>
+        <input bind:value={draft.detail} />
+      </label>
+
+      <label>
+        <span>{isEnglish ? 'Address' : 'Alamat'}</span>
+        <input bind:value={draft.address} />
+      </label>
+
+      <label>
+        <span>{isEnglish ? 'Phone' : 'Telepon'}</span>
+        <input bind:value={draft.phone} />
+      </label>
+
+      <label>
+        <span>Email</span>
+        <input type="email" bind:value={draft.email} />
+      </label>
     </div>
-  {/if}
-</AppCard>
+
+    <div class="action-row client-form-actions">
+      <AppButton variant="ghost" on:click={reset}>{isEnglish ? 'New Client' : 'Klien Baru'}</AppButton>
+      <AppButton disabled={saving} on:click={save}>{saving ? (isEnglish ? 'Saving...' : 'Menyimpan...') : editingId ? (isEnglish ? 'Update Client' : 'Update Klien') : (isEnglish ? 'Save Client' : 'Simpan Klien')}</AppButton>
+    </div>
+  </AppCard>
+
+  <AppCard title={isEnglish ? 'Client List' : 'Daftar Klien'} description={isEnglish ? 'Select a client to edit saved recipient information.' : 'Pilih klien untuk mengedit informasi penerima yang tersimpan.'}>
+    {#if clients.length === 0}
+      <div class="empty-state small">
+        <strong>{isEnglish ? 'No clients yet' : 'Belum ada klien'}</strong>
+        <p>{isEnglish ? 'Saved clients will appear here.' : 'Klien yang disimpan akan tampil di sini.'}</p>
+      </div>
+    {:else}
+      <div class="client-list professional-client-list">
+        {#each clients as client (client.id)}
+          <article class="client-item professional-client-item">
+            <button type="button" on:click={() => editClient(client)}>
+              <strong>{getClientHeading(client)}</strong>
+              <span>{getClientSubheading(client)}</span>
+              <small>{getClientMeta(client)}</small>
+            </button>
+            <AppButton variant="danger" on:click={() => deleteClient(client)}>{isEnglish ? 'Delete' : 'Hapus'}</AppButton>
+          </article>
+        {/each}
+      </div>
+    {/if}
+  </AppCard>
+</div>

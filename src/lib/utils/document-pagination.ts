@@ -1,11 +1,24 @@
-import type { DocumentDraft, DocumentItem } from '$lib/types';
+import type { DocumentDraft, DocumentItem, DocumentItemUnit } from '$lib/types';
 import { terbilangRupiah } from './number-to-words';
 import { richTextToLines } from './rich-text';
 import { calculateTotal } from './format';
 
+export type PaginatedDocumentItem = {
+  pageItemKey: string;
+  itemKey: string;
+  description: string;
+  noteLines: string[];
+  quantity: number;
+  unit: DocumentItemUnit;
+  unitPrice: number;
+  continuation: boolean;
+  showValues: boolean;
+  rowHeight: number;
+};
+
 export type DocumentPrintPage = {
   pageKey: string;
-  items: DocumentItem[];
+  items: PaginatedDocumentItem[];
   showDocumentHeader: boolean;
   showTable: boolean;
   showSummary: boolean;
@@ -20,12 +33,16 @@ export const documentLayout = {
   firstTableTop: 384,
   nextTableTop: 148,
   tableHeaderHeight: 49,
-  tableBottom: 1024,
-  summaryGap: 44,
-  summaryOnlyTop: 174,
-  descriptionChars: 54,
-  noteChars: 62,
-  noteBoxChars: 118
+  tableBottom: 950,
+  summaryGap: 36,
+  summaryOnlyTop: 164,
+  minimumRowHeight: 108,
+  rowBaseHeight: 68,
+  descriptionChars: 38,
+  noteChars: 44,
+  noteLineHeight: 16,
+  descriptionLineHeight: 14,
+  noteBoxChars: 96
 };
 
 function lineCount(value: string, charsPerLine: number): number {
@@ -39,32 +56,77 @@ function lineCount(value: string, charsPerLine: number): number {
   return Math.max(1, Math.ceil(clean.length / charsPerLine));
 }
 
-function richLineCount(lines: string[], charsPerLine: number): number {
-  return (lines.length > 0 ? lines : ['-']).reduce((total, line) => total + lineCount(line, charsPerLine), 0);
+function wrapApprox(value: string, charsPerLine: number): string[] {
+  const clean = (value || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean) return [];
+
+  const words = clean.split(' ');
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+
+    if (next.length <= charsPerLine) {
+      current = next;
+      continue;
+    }
+
+    if (current) lines.push(current);
+
+    if (word.length <= charsPerLine) {
+      current = word;
+      continue;
+    }
+
+    let rest = word;
+    while (rest.length > charsPerLine) {
+      lines.push(rest.slice(0, charsPerLine));
+      rest = rest.slice(charsPerLine);
+    }
+    current = rest;
+  }
+
+  if (current) lines.push(current);
+  return lines;
 }
 
-export function estimateDocumentItemHeight(item: DocumentItem): number {
-  const noteLines = richTextToLines(item.note);
-  const descriptionLines = lineCount(item.description, documentLayout.descriptionChars);
-  const itemNoteLines = richLineCount(noteLines, documentLayout.noteChars);
+function getWrappedNoteLines(item: DocumentItem): string[] {
+  const logicalLines = richTextToLines(item.note);
+  const source = logicalLines.length > 0 ? logicalLines : ['-'];
 
-  return Math.max(116, 72 + descriptionLines * 14 + itemNoteLines * 12);
+  return source.flatMap((line) => wrapApprox(line, documentLayout.noteChars));
+}
+
+function getDescriptionHeight(description: string): number {
+  return lineCount(description, documentLayout.descriptionChars) * documentLayout.descriptionLineHeight;
+}
+
+function rowHeightFor(description: string, noteLineCount: number): number {
+  return Math.max(
+    documentLayout.minimumRowHeight,
+    documentLayout.rowBaseHeight + getDescriptionHeight(description) + Math.max(1, noteLineCount) * documentLayout.noteLineHeight
+  );
+}
+
+function maxNoteLinesForHeight(description: string, availableHeight: number): number {
+  const fixedHeight = documentLayout.rowBaseHeight + getDescriptionHeight(description);
+  return Math.max(0, Math.floor((availableHeight - fixedHeight) / documentLayout.noteLineHeight));
 }
 
 function estimateNoteHeight(noteText: string): number {
   const rows = lineCount(noteText, documentLayout.noteBoxChars);
-
   return Math.max(70, 50 + rows * 13);
 }
 
 export function estimateSummaryHeight(document: DocumentDraft, noteText: string): number {
   const total = calculateTotal(document.items, document.tax);
-  const spelledRows = lineCount(terbilangRupiah(total), 42);
+  const spelledRows = lineCount(terbilangRupiah(total, document.language), 42);
   const spelledHeight = Math.max(96, 52 + spelledRows * 17);
   const lowerHeight = Math.max(spelledHeight, 135);
   const noteHeight = estimateNoteHeight(noteText);
 
-  return lowerHeight + 48 + 156 + 20 + noteHeight + 32;
+  return lowerHeight + 40 + 156 + 20 + noteHeight + 32;
 }
 
 function createPage(index: number): DocumentPrintPage {
@@ -78,26 +140,75 @@ function createPage(index: number): DocumentPrintPage {
   };
 }
 
+function pageContentTop(page: DocumentPrintPage): number {
+  return page.tableTop + documentLayout.tableHeaderHeight + page.items.reduce((sum, item) => sum + item.rowHeight, 0);
+}
+
+function pushCurrentPage(pages: DocumentPrintPage[], page: DocumentPrintPage): DocumentPrintPage {
+  pages.push(page);
+  return createPage(pages.length);
+}
+
+function appendItemAcrossPages(pages: DocumentPrintPage[], currentPage: DocumentPrintPage, item: DocumentItem): DocumentPrintPage {
+  let remainingLines = getWrappedNoteLines(item);
+  let continuation = false;
+  let segment = 0;
+
+  while (remainingLines.length > 0) {
+    let currentTop = pageContentTop(currentPage);
+    let availableHeight = documentLayout.tableBottom - currentTop;
+    const segmentDescription = continuation ? item.description : item.description;
+    let maxLines = maxNoteLinesForHeight(segmentDescription, availableHeight);
+
+    if (maxLines < 1 || availableHeight < documentLayout.minimumRowHeight) {
+      currentPage = pushCurrentPage(pages, currentPage);
+      currentTop = pageContentTop(currentPage);
+      availableHeight = documentLayout.tableBottom - currentTop;
+      maxLines = maxNoteLinesForHeight(segmentDescription, availableHeight);
+    }
+
+    const lineCountForSegment = Math.max(1, Math.min(remainingLines.length, maxLines));
+    const noteLines = remainingLines.slice(0, lineCountForSegment);
+    remainingLines = remainingLines.slice(lineCountForSegment);
+    const rowHeight = Math.min(rowHeightFor(segmentDescription, noteLines.length), availableHeight);
+
+    currentPage.items = [
+      ...currentPage.items,
+      {
+        pageItemKey: `${item.itemKey}-${segment}`,
+        itemKey: item.itemKey,
+        description: item.description,
+        noteLines,
+        quantity: item.quantity,
+        unit: item.unit,
+        unitPrice: item.unitPrice,
+        continuation,
+        showValues: !continuation,
+        rowHeight
+      }
+    ];
+
+    continuation = true;
+    segment += 1;
+
+    if (remainingLines.length > 0) {
+      currentPage = pushCurrentPage(pages, currentPage);
+    }
+  }
+
+  return currentPage;
+}
+
 export function paginateDocument(document: DocumentDraft, noteText: string): DocumentPrintPage[] {
   const pages: DocumentPrintPage[] = [];
   let currentPage = createPage(0);
-  let currentTop = currentPage.tableTop + documentLayout.tableHeaderHeight;
 
-  document.items.forEach((item) => {
-    const itemHeight = estimateDocumentItemHeight(item);
-    const nextTop = currentTop + itemHeight;
-
-    if (currentPage.items.length > 0 && nextTop > documentLayout.tableBottom) {
-      pages.push(currentPage);
-      currentPage = createPage(pages.length);
-      currentTop = currentPage.tableTop + documentLayout.tableHeaderHeight;
-    }
-
-    currentPage.items = [...currentPage.items, item];
-    currentTop += itemHeight;
-  });
+  for (const item of document.items) {
+    currentPage = appendItemAcrossPages(pages, currentPage, item);
+  }
 
   const summaryHeight = estimateSummaryHeight(document, noteText);
+  const currentTop = pageContentTop(currentPage);
   const summaryBottom = currentTop + documentLayout.summaryGap + summaryHeight;
 
   if (summaryBottom <= documentLayout.tableBottom) {
@@ -106,7 +217,8 @@ export function paginateDocument(document: DocumentDraft, noteText: string): Doc
     return pages;
   }
 
-  pages.push(currentPage);
+  if (currentPage.items.length > 0 || pages.length === 0) pages.push(currentPage);
+
   pages.push({
     pageKey: `page-${pages.length + 1}`,
     items: [],
@@ -122,5 +234,5 @@ export function paginateDocument(document: DocumentDraft, noteText: string): Doc
 export function getPageTableEndTop(page: DocumentPrintPage): number {
   if (!page.showTable) return documentLayout.summaryOnlyTop;
 
-  return page.items.reduce((top, item) => top + estimateDocumentItemHeight(item), page.tableTop + documentLayout.tableHeaderHeight);
+  return page.tableTop + documentLayout.tableHeaderHeight + page.items.reduce((top, item) => top + item.rowHeight, 0);
 }

@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "identifier": "id.ezcode.dony-invoice",
   "build": {
-    "beforeDevCommand": "npm run dev -- --host 127.0.0.1",
+    "beforeDevCommand": "npm run dev -- --host 127.0.0.1 --force",
     "devUrl": "http://127.0.0.1:5173",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../build"
@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Dony Invoice",
-        "width": 1280,
-        "height": 860,
+        "width": 1600,
+        "height": 920,
         "minWidth": 1180,
         "minHeight": 720,
         "resizable": true

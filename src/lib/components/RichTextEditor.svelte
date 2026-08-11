@@ -1,8 +1,10 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import type { DocumentLanguage } from '$lib/types';
   import { sanitizeRichText } from '$lib/utils/rich-text';
 
   export let value = '';
+  export let language: DocumentLanguage = 'id';
 
   let editor: HTMLDivElement;
   let internalValue = '';
@@ -35,13 +37,13 @@
 </script>
 
 <div class="rich-text-editor">
-  <div class="rich-toolbar" aria-label="Toolbar catatan item">
+  <div class="rich-toolbar" aria-label={language === 'en' ? 'Item note toolbar' : 'Toolbar catatan item'}>
     <button type="button" on:click={() => applyCommand('bold')}>B</button>
     <button type="button" on:click={() => applyCommand('italic')}>I</button>
     <button type="button" on:click={() => applyCommand('underline')}>U</button>
-    <button type="button" on:click={() => applyCommand('insertUnorderedList')}>• List</button>
-    <button type="button" on:click={() => applyCommand('insertOrderedList')}>1. List</button>
-    <button type="button" on:click={clearFormat}>Clear</button>
+    <button type="button" on:click={() => applyCommand('insertUnorderedList')}>• {language === 'en' ? 'List' : 'Daftar'}</button>
+    <button type="button" on:click={() => applyCommand('insertOrderedList')}>1. {language === 'en' ? 'List' : 'Daftar'}</button>
+    <button type="button" on:click={clearFormat}>{language === 'en' ? 'Clear' : 'Bersihkan'}</button>
   </div>
 
   <div

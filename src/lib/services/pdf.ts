@@ -1,12 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib';
-import { documentConfigs, getDefaultDocumentNote } from '$lib/document-config';
-import type { CompanySettings, DocumentDraft, DocumentItem } from '$lib/types';
-import { calculateSubtotal, calculateTotal, cleanPdfFileName, formatDateIndonesia } from '$lib/utils/format';
+import { getDefaultDocumentNote, getDocumentConfig, getDocumentItemUnitLabel, getDocumentText, getPaymentMethodLabel } from '$lib/document-config';
+import type { CompanySettings, DocumentDraft } from '$lib/types';
+import { calculateSubtotal, calculateTotal, cleanPdfFileName, formatDocumentDate } from '$lib/utils/format';
 import { terbilangRupiah } from '$lib/utils/number-to-words';
-import { richTextToLines } from '$lib/utils/rich-text';
 import { documentAccentColor, hexToUnitRgb } from '$lib/utils/color';
-import { documentLayout, estimateDocumentItemHeight, getPageTableEndTop, paginateDocument, type DocumentPrintPage } from '$lib/utils/document-pagination';
+import { documentLayout, getPageTableEndTop, paginateDocument, type DocumentPrintPage, type PaginatedDocumentItem } from '$lib/utils/document-pagination';
 
 const navy = rgb(0.02, 0.21, 0.29);
 const gray = rgb(0.38, 0.43, 0.48);
@@ -203,7 +202,7 @@ function drawMetaTable(page: PDFPage, rows: string[][], fonts: Fonts): void {
 }
 
 function drawDocumentHeader(page: PDFPage, context: PdfContext, pageIndex: number): void {
-  const config = documentConfigs[context.document.documentType];
+  const config = getDocumentConfig(context.document.documentType, context.document.language);
   const left = px(documentLayout.left);
   const right = pageWidth - px(documentLayout.right);
   const isContinuation = pageIndex > 0;
@@ -217,27 +216,45 @@ function drawDocumentHeader(page: PDFPage, context: PdfContext, pageIndex: numbe
     drawText(page, context.company.name, left, yTop(isContinuation ? 70 : 83), isContinuation ? 16 : 21, context.fonts.bold, context.accent);
   }
 
-  drawText(page, context.company.subtitle, left, yTop(isContinuation ? 91 : 104), isContinuation ? 7 : 8, context.fonts.regular, gray);
-  drawRightText(page, isContinuation ? `${config.title} LANJUTAN` : config.title, right, yTop(isContinuation ? 68 : 82), isContinuation ? 19 : 27, context.fonts.bold, navy);
-  drawRightText(page, context.company.businessDescription, right, yTop(isContinuation ? 91 : 104), 8, context.fonts.regular, gray);
+  const companySubtitle = context.document.language === 'en' ? context.company.subtitleEn || context.company.subtitle : context.company.subtitle;
+  const companyDescription = context.document.language === 'en' ? context.company.businessDescriptionEn || context.company.businessDescription : context.company.businessDescription;
+  drawText(page, companySubtitle, left, yTop(isContinuation ? 91 : 104), isContinuation ? 7 : 8, context.fonts.regular, gray);
+
+  if (!isContinuation) {
+    const issuerDetails = [context.company.address, context.company.phone, context.company.email].filter(Boolean).join(' · ');
+    if (issuerDetails) {
+      drawWrapped(page, issuerDetails, left, yTop(124), 6.5, context.fonts.regular, px(300), 9, gray);
+    }
+  }
+
+  drawRightText(page, isContinuation ? `${config.title} ${getDocumentText(context.document.language).continuation}` : config.title, right, yTop(isContinuation ? 68 : 82), isContinuation ? 19 : 27, context.fonts.bold, navy);
+  drawRightText(page, companyDescription, right, yTop(isContinuation ? 91 : 104), 8, context.fonts.regular, gray);
 }
 
 function drawRecipientAndMeta(page: PDFPage, context: PdfContext): void {
-  const config = documentConfigs[context.document.documentType];
+  const config = getDocumentConfig(context.document.documentType, context.document.language);
   const left = px(documentLayout.left);
 
   drawBox(page, left, yTop(184, 150), px(306), px(150));
   drawText(page, config.recipientLabel, left + px(20), yTop(216), 8, context.fonts.bold, context.accent);
-  drawText(page, context.document.customerName, left + px(20), yTop(263), 10, context.fonts.bold, black);
-  drawWrapped(page, context.document.customerDetail, left + px(20), yTop(310), 9, context.fonts.regular, px(254), 11, black);
+  drawText(page, context.document.customerName || '-', left + px(20), yTop(255), 10, context.fonts.bold, black);
+
+  let recipientTop = 279;
+
+  if (context.document.customerCompany) {
+    drawWrapped(page, context.document.customerCompany, left + px(20), yTop(recipientTop), 8, context.fonts.regular, px(254), 11, gray);
+    recipientTop += 24;
+  }
+
+  drawWrapped(page, context.document.customerDetail || '-', left + px(20), yTop(recipientTop), 8, context.fonts.regular, px(254), 11, black);
 
   drawMetaTable(
     page,
     [
       [config.numberInputLabel.toUpperCase(), context.document.documentNumber],
-      ['TANGGAL', formatDateIndonesia(context.document.issueDate)],
-      [config.secondaryDateLabel.toUpperCase(), formatDateIndonesia(context.document.dueDate)],
-      ['METODE BAYAR', context.document.paymentMethod]
+      [getDocumentText(context.document.language).date, formatDocumentDate(context.document.issueDate, context.document.language)],
+      [config.secondaryDateLabel.toUpperCase(), formatDocumentDate(context.document.dueDate, context.document.language)],
+      [getDocumentText(context.document.language).paymentMethod, getPaymentMethodLabel(context.document.paymentMethod, context.document.language)]
     ],
     context.fonts
   );
@@ -245,8 +262,8 @@ function drawRecipientAndMeta(page: PDFPage, context: PdfContext): void {
 
 function getTableMetrics(): { x: number; width: number; descriptionWidth: number; quantityWidth: number; priceWidth: number; totalWidth: number } {
   const tableWidth = pageWidth - px(documentLayout.left + documentLayout.right);
-  const descriptionWidth = tableWidth * 0.5;
-  const quantityWidth = tableWidth * 0.1;
+  const descriptionWidth = tableWidth * 0.46;
+  const quantityWidth = tableWidth * 0.14;
   const priceWidth = tableWidth * 0.2;
   const totalWidth = tableWidth - descriptionWidth - quantityWidth - priceWidth;
 
@@ -261,41 +278,52 @@ function getTableMetrics(): { x: number; width: number; descriptionWidth: number
 }
 
 function drawTableHeader(page: PDFPage, context: PdfContext, top: number): void {
-  const config = documentConfigs[context.document.documentType];
+  const config = getDocumentConfig(context.document.documentType, context.document.language);
   const metrics = getTableMetrics();
   const headerY = yTop(top, documentLayout.tableHeaderHeight);
   const headerHeight = px(documentLayout.tableHeaderHeight);
 
   page.drawRectangle({ x: metrics.x, y: headerY, width: metrics.width, height: headerHeight, color: navy });
   drawCenteredText(page, config.tableDescriptionLabel, metrics.x + metrics.descriptionWidth / 2, headerY + px(20), 8, context.fonts.bold, white);
-  drawCenteredText(page, 'Qty', metrics.x + metrics.descriptionWidth + metrics.quantityWidth / 2, headerY + px(20), 8, context.fonts.bold, white);
-  drawCenteredText(page, 'Harga Satuan', metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth / 2, headerY + px(20), 8, context.fonts.bold, white);
-  drawCenteredText(page, 'Total', metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth + metrics.totalWidth / 2, headerY + px(20), 8, context.fonts.bold, white);
+  const text = getDocumentText(context.document.language);
+  drawCenteredText(page, text.quantityUnit, metrics.x + metrics.descriptionWidth + metrics.quantityWidth / 2, headerY + px(20), 8, context.fonts.bold, white);
+  drawCenteredText(page, text.unitPrice, metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth / 2, headerY + px(20), 8, context.fonts.bold, white);
+  drawCenteredText(page, text.total, metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth + metrics.totalWidth / 2, headerY + px(20), 8, context.fonts.bold, white);
 }
 
-function drawTableItem(page: PDFPage, context: PdfContext, item: DocumentItem, top: number): number {
+function drawTableItem(page: PDFPage, context: PdfContext, item: PaginatedDocumentItem, top: number): number {
   const metrics = getTableMetrics();
-  const itemHeight = estimateDocumentItemHeight(item);
+  const itemHeight = item.rowHeight;
   const itemY = yTop(top, itemHeight);
   const lineTotal = item.quantity * item.unitPrice;
   const descriptionX = metrics.x + px(20);
   const descriptionMaxWidth = metrics.descriptionWidth - px(40);
+  const continuationLabel = context.document.language === 'en' ? 'continued' : 'lanjutan';
+  const description = item.continuation ? `${item.description} - ${continuationLabel}` : item.description;
 
   drawTableCell(page, metrics.x, itemY, metrics.descriptionWidth, px(itemHeight));
   drawTableCell(page, metrics.x + metrics.descriptionWidth, itemY, metrics.quantityWidth, px(itemHeight));
   drawTableCell(page, metrics.x + metrics.descriptionWidth + metrics.quantityWidth, itemY, metrics.priceWidth, px(itemHeight));
   drawTableCell(page, metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth, itemY, metrics.totalWidth, px(itemHeight));
-  drawWrapped(page, item.description || '-', descriptionX, yTop(top + 34), 8, context.fonts.bold, descriptionMaxWidth, 10, black);
-  drawWrappedLines(page, richTextToLines(item.note), descriptionX, yTop(top + 62), 7, context.fonts.regular, descriptionMaxWidth, 9, gray);
-  drawCenteredText(page, `${item.quantity}`, metrics.x + metrics.descriptionWidth + metrics.quantityWidth / 2, itemY + px(itemHeight / 2) - 4, 8, context.fonts.regular, black);
-  drawRightFittedText(page, formatRupiah(item.unitPrice), metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth - px(14), itemY + px(itemHeight / 2) - 4, 8, 6, context.fonts.regular, black, metrics.priceWidth - px(24));
-  drawRightFittedText(page, formatRupiah(lineTotal), metrics.x + metrics.width - px(14), itemY + px(itemHeight / 2) - 4, 8, 6, context.fonts.regular, black, metrics.totalWidth - px(24));
+  drawWrapped(page, description || '-', descriptionX, yTop(top + 30), 8, context.fonts.bold, descriptionMaxWidth, 10, black);
+  drawWrappedLines(page, item.noteLines, descriptionX, yTop(top + 58), 7, context.fonts.regular, descriptionMaxWidth, 9, gray);
+
+  if (item.showValues) {
+    const quantityUnit = `${item.quantity} ${getDocumentItemUnitLabel(item.unit, context.document.language)}`;
+    drawCenteredText(page, quantityUnit, metrics.x + metrics.descriptionWidth + metrics.quantityWidth / 2, itemY + px(itemHeight / 2) - 4, 7, context.fonts.regular, black);
+    drawRightFittedText(page, `${formatRupiah(item.unitPrice)}${item.unit === 'mandays' ? ' / Manday' : ''}`, metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth - px(14), itemY + px(itemHeight / 2) - 4, 8, 5.5, context.fonts.regular, black, metrics.priceWidth - px(24));
+    drawRightFittedText(page, formatRupiah(lineTotal), metrics.x + metrics.width - px(14), itemY + px(itemHeight / 2) - 4, 8, 6, context.fonts.regular, black, metrics.totalWidth - px(24));
+  } else {
+    drawCenteredText(page, '-', metrics.x + metrics.descriptionWidth + metrics.quantityWidth / 2, itemY + px(itemHeight / 2) - 4, 8, context.fonts.regular, gray);
+    drawCenteredText(page, '-', metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth / 2, itemY + px(itemHeight / 2) - 4, 8, context.fonts.regular, gray);
+    drawCenteredText(page, '-', metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth + metrics.totalWidth / 2, itemY + px(itemHeight / 2) - 4, 8, context.fonts.regular, gray);
+  }
 
   return top + itemHeight;
 }
 
 function drawSummarySection(page: PDFPage, context: PdfContext, top: number): void {
-  const config = documentConfigs[context.document.documentType];
+  const config = getDocumentConfig(context.document.documentType, context.document.language);
   const subtotal = calculateSubtotal(context.document.items);
   const total = calculateTotal(context.document.items, context.document.tax);
   const left = px(documentLayout.left);
@@ -308,12 +336,13 @@ function drawSummarySection(page: PDFPage, context: PdfContext, top: number): vo
   const summaryTop = top;
 
   drawBox(page, left, yTop(summaryTop, spelledBoxHeight), px(300), px(spelledBoxHeight));
-  drawText(page, 'TERBILANG', left + px(22), yTop(summaryTop + 31), 8, context.fonts.bold, context.accent);
-  drawWrapped(page, terbilangRupiah(total), left + px(22), yTop(summaryTop + 77), 9, context.fonts.bold, px(248), 12, navy);
+  const text = getDocumentText(context.document.language);
+  drawText(page, text.amountInWords, left + px(22), yTop(summaryTop + 31), 8, context.fonts.bold, context.accent);
+  drawWrapped(page, terbilangRupiah(total, context.document.language), left + px(22), yTop(summaryTop + 77), 9, context.fonts.bold, px(248), 12, navy);
 
   const summaryRows = [
     ['Subtotal', formatRupiah(subtotal), white, context.fonts.regular, black, 8],
-    ['Pajak', formatRupiah(context.document.tax), white, context.fonts.regular, black, 8],
+    [text.tax, formatRupiah(context.document.tax), white, context.fonts.regular, black, 8],
     [config.totalLabel, formatRupiah(total), context.accentSoft, context.fonts.bold, context.accent, 13]
   ] as const;
 
@@ -330,13 +359,13 @@ function drawSummarySection(page: PDFPage, context: PdfContext, top: number): vo
   const signTop = summaryTop + 135 + 48;
   const bankHeight = 156;
   drawBox(page, left, yTop(signTop, bankHeight), px(306), px(bankHeight));
-  drawText(page, 'BANK ACCOUNT', left + px(22), yTop(signTop + 31), 8, context.fonts.bold, context.accent);
+  drawText(page, text.bankAccount, left + px(22), yTop(signTop + 31), 8, context.fonts.bold, context.accent);
   drawWrapped(page, `Bank: ${context.company.bankName || '-'}`, left + px(22), yTop(signTop + 70), 8, context.fonts.regular, px(260), 12, black);
-  drawWrapped(page, `No. Rekening: ${context.company.bankAccountNumber || '-'}`, left + px(22), yTop(signTop + 104), 8, context.fonts.regular, px(260), 12, black);
-  drawWrapped(page, `Nama: ${context.company.bankAccountHolder || '-'}`, left + px(22), yTop(signTop + 135), 8, context.fonts.regular, px(260), 12, black);
+  drawWrapped(page, `${text.accountNumber}: ${context.company.bankAccountNumber || '-'}`, left + px(22), yTop(signTop + 104), 8, context.fonts.regular, px(260), 12, black);
+  drawWrapped(page, `${text.accountName}: ${context.company.bankAccountHolder || '-'}`, left + px(22), yTop(signTop + 135), 8, context.fonts.regular, px(260), 12, black);
 
   const signatureX = right - px(306);
-  drawCenteredText(page, `${context.company.city || '-'}, ${formatDateIndonesia(context.document.issueDate)}`, signatureX + px(153), yTop(signTop + 54), 8, context.fonts.regular, gray);
+  drawCenteredText(page, `${context.company.city || '-'}, ${formatDocumentDate(context.document.issueDate, context.document.language)}`, signatureX + px(153), yTop(signTop + 54), 8, context.fonts.regular, gray);
 
   if (context.signatureImage) {
     const signatureSize = context.signatureImage.scaleToFit(px(160), px(60));
@@ -345,22 +374,25 @@ function drawSummarySection(page: PDFPage, context: PdfContext, top: number): vo
 
   drawCenteredText(page, context.company.signerName || '-', signatureX + px(153), yTop(signTop + 135), 9, context.fonts.bold, black);
 
-  if (context.company.signerRole) {
-    drawCenteredText(page, context.company.signerRole, signatureX + px(153), yTop(signTop + 151), 8, context.fonts.regular, gray);
+  const signerRole = context.document.language === 'en' ? context.company.signerRoleEn || context.company.signerRole : context.company.signerRole;
+
+  if (signerRole) {
+    drawCenteredText(page, signerRole, signatureX + px(153), yTop(signTop + 151), 8, context.fonts.regular, gray);
   }
 
   const noteTop = signTop + bankHeight + 20;
   const noteHeight = Math.max(70, 50 + wrapText(context.noteText, context.fonts.regular, 7, pageWidth - px(180)).length * 13);
   drawBox(page, left, yTop(noteTop, noteHeight), pageWidth - px(136), px(noteHeight));
-  drawText(page, 'CATATAN', left + px(22), yTop(noteTop + 28), 8, context.fonts.bold, context.accent);
+  drawText(page, text.notes, left + px(22), yTop(noteTop + 28), 8, context.fonts.bold, context.accent);
   drawWrapped(page, context.noteText, left + px(22), yTop(noteTop + 54), 7, context.fonts.regular, pageWidth - px(180), 9, black);
 }
 
 function drawFooter(page: PDFPage, context: PdfContext, pageIndex: number): void {
-  const config = documentConfigs[context.document.documentType];
+  const config = getDocumentConfig(context.document.documentType, context.document.language);
   const left = px(documentLayout.left);
   const right = pageWidth - px(documentLayout.right);
-  const pageLabel = `Halaman ${pageIndex + 1} dari ${context.pages.length}`;
+  const text = getDocumentText(context.document.language);
+  const pageLabel = `${text.page} ${pageIndex + 1} ${text.of} ${context.pages.length}`;
 
   drawText(page, config.footerText, left, px(31), 7, context.fonts.regular, gray);
   drawRightText(page, pageLabel, right, px(31), 7, context.fonts.regular, gray);
@@ -397,7 +429,7 @@ export async function exportDocumentPdf(document: DocumentDraft, company: Compan
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const accent = pdfColor(documentAccentColor(company, document.documentType));
   const accentSoft = pdfSoftColor(documentAccentColor(company, document.documentType));
-  const noteText = document.serviceNote || getDefaultDocumentNote(company, document.documentType);
+  const noteText = document.serviceNote || getDefaultDocumentNote(company, document.documentType, document.language);
   const logoImage = await embedImage(pdf, company.logoDataUrl);
   const signatureImage = await embedImage(pdf, company.signatureDataUrl);
   const context: PdfContext = {

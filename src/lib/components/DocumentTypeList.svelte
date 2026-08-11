@@ -2,12 +2,14 @@
   import { createEventDispatcher } from 'svelte';
   import AppButton from './AppButton.svelte';
   import AppCard from './AppCard.svelte';
-  import { documentConfigs, getPrimaryActionLabel, getStatusClass, getStatusLabel } from '$lib/document-config';
-  import type { DocumentRecord, DocumentType } from '$lib/types';
-  import { formatCurrency, formatDateIndonesia } from '$lib/utils/format';
+  import { getPrimaryActionLabel, getStatusClass, getStatusLabel } from '$lib/document-config';
+  import { getAppDocumentLabel } from '$lib/i18n';
+  import type { DocumentLanguage, DocumentRecord, DocumentType } from '$lib/types';
+  import { formatCurrency, formatDocumentDate } from '$lib/utils/format';
 
   export let documents: DocumentRecord[] = [];
   export let documentType: DocumentType;
+  export let language: DocumentLanguage = 'id';
 
   const dispatch = createEventDispatcher<{
     create: DocumentType;
@@ -16,7 +18,8 @@
     complete: DocumentRecord;
   }>();
 
-  $: config = documentConfigs[documentType];
+  $: isEnglish = language === 'en';
+  $: documentLabel = getAppDocumentLabel(documentType, language);
   $: filteredDocuments = documents.filter((document) => document.documentType === documentType);
 
   function createDocument(): void {
@@ -34,18 +37,22 @@
   function completeDocument(document: DocumentRecord): void {
     dispatch('complete', document);
   }
+
+  function getRecipientMeta(document: DocumentRecord): string {
+    return document.customerCompany || document.customerDetail || '-';
+  }
 </script>
 
-<AppCard title={`Daftar ${config.menuLabel}`} description={`Data ${config.menuLabel.toLowerCase()} yang sudah disimpan.`}>
+<AppCard title={`${isEnglish ? 'Saved' : 'Daftar'} ${documentLabel}`} description={isEnglish ? `Saved ${documentLabel.toLowerCase()} documents.` : `Data ${documentLabel.toLowerCase()} yang sudah disimpan.`}>
   <div class="list-toolbar">
-    <span>{filteredDocuments.length} Dokumen</span>
-    <AppButton variant="secondary" on:click={createDocument}>{config.menuLabel} Baru</AppButton>
+    <span>{filteredDocuments.length} {isEnglish ? 'Documents' : 'Dokumen'}</span>
+    <AppButton variant="secondary" on:click={createDocument}>{isEnglish ? 'New' : 'Baru'} {documentLabel}</AppButton>
   </div>
 
   {#if filteredDocuments.length === 0}
     <div class="empty-state small">
-      <strong>{config.emptyTitle}</strong>
-      <p>{config.emptyDescription}</p>
+      <strong>{isEnglish ? `No ${documentLabel.toLowerCase()} yet` : `Belum ada ${documentLabel.toLowerCase()}`}</strong>
+      <p>{isEnglish ? `Saved ${documentLabel.toLowerCase()} documents will appear here.` : `${documentLabel} yang disimpan akan tampil di sini.`}</p>
     </div>
   {:else}
     <div class="document-list">
@@ -54,12 +61,12 @@
           <button class="document-list-main" type="button" on:click={() => selectDocument(document)}>
             <span>{document.documentNumber}</span>
             <strong>{document.customerName || '-'}</strong>
-            <small>{formatDateIndonesia(document.issueDate)} · {formatCurrency(document.total)}</small>
+            <small>{getRecipientMeta(document)} · {formatDocumentDate(document.issueDate, language)} · {formatCurrency(document.total)}</small>
           </button>
           <div class="document-list-actions">
-            <span class="status-pill {getStatusClass(document.status)}">{getStatusLabel(document.status, document.documentType)}</span>
-            <AppButton variant="ghost" disabled={document.status === 'approved' || document.status === 'paid'} on:click={() => completeDocument(document)}>{getPrimaryActionLabel(document.documentType)}</AppButton>
-            <AppButton variant="danger" on:click={() => deleteDocument(document)}>Hapus</AppButton>
+            <span class="status-pill {getStatusClass(document.status)}">{getStatusLabel(document.status, document.documentType, language)}</span>
+            <AppButton variant="ghost" disabled={document.status === 'approved' || document.status === 'paid'} on:click={() => completeDocument(document)}>{getPrimaryActionLabel(document.documentType, language)}</AppButton>
+            <AppButton variant="danger" on:click={() => deleteDocument(document)}>{isEnglish ? 'Delete' : 'Hapus'}</AppButton>
           </div>
         </article>
       {/each}

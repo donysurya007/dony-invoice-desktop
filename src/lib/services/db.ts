@@ -1,7 +1,7 @@
 import Database from '@tauri-apps/plugin-sql';
 import { documentConfigs, documentOrder } from '$lib/document-config';
 import { defaultCompanySettings } from '$lib/constants';
-import type { ClientDraft, ClientRecord, CompanySettings, DashboardSummary, DocumentDraft, DocumentItem, DocumentRecord, DocumentStatus, DocumentType, PaymentMethod } from '$lib/types';
+import type { ClientDraft, ClientRecord, CompanySettings, DashboardSummary, DocumentDraft, DocumentItem, DocumentLanguage, DocumentRecord, DocumentStatus, DocumentType, PaymentMethod } from '$lib/types';
 import { calculateSubtotal, calculateTotal } from '$lib/utils/format';
 import { createKey } from '$lib/utils/id';
 
@@ -44,11 +44,13 @@ type DocumentRow = {
   id: string;
   document_type: DocumentType;
   document_number: string;
+  language?: DocumentLanguage | null;
   issue_date: string;
   due_date: string;
   payment_method: PaymentMethod;
   client_id?: string | null;
   customer_name: string;
+  customer_company?: string | null;
   customer_detail: string;
   service_note: string;
   tax: number;
@@ -63,6 +65,7 @@ type DocumentRow = {
 type ClientRow = {
   id: string;
   name: string;
+  company_name?: string | null;
   detail: string;
   address: string;
   phone: string;
@@ -95,6 +98,7 @@ function parseItems(value: string): DocumentItem[] {
       description: item.description || '',
       note: item.note || '',
       quantity: Number(item.quantity) || 0,
+      unit: item.unit === 'mandays' ? 'mandays' : 'qty',
       unitPrice: Number(item.unitPrice) || 0
     }));
   } catch {
@@ -106,12 +110,14 @@ function mapDocument(row: DocumentRow): DocumentRecord {
   return {
     id: row.id,
     documentType: row.document_type,
+    language: row.language === 'en' ? 'en' : 'id',
     documentNumber: row.document_number,
     issueDate: row.issue_date,
     dueDate: row.due_date,
     paymentMethod: row.payment_method,
     clientId: row.client_id || '',
     customerName: row.customer_name,
+    customerCompany: row.customer_company || '',
     customerDetail: row.customer_detail,
     serviceNote: row.service_note,
     tax: Number(row.tax) || 0,
@@ -128,6 +134,7 @@ function mapClient(row: ClientRow): ClientRecord {
   return {
     id: row.id,
     name: row.name,
+    companyName: row.company_name || '',
     detail: row.detail,
     address: row.address,
     phone: row.phone,
@@ -137,13 +144,31 @@ function mapClient(row: ClientRow): ClientRecord {
   };
 }
 
-async function ensureDocumentClientColumn(db: Database): Promise<void> {
+async function ensureDocumentColumns(db: Database): Promise<void> {
   const columns = await db.select<ColumnRow[]>('PRAGMA table_info(documents)');
-  const hasClientId = columns.some((column) => column.name === 'client_id');
+  const names = new Set(columns.map((column) => column.name));
 
-  if (!hasClientId) {
+  if (!names.has('client_id')) {
     await db.execute("ALTER TABLE documents ADD COLUMN client_id TEXT NOT NULL DEFAULT ''");
-    await db.execute('CREATE INDEX IF NOT EXISTS idx_documents_client_id ON documents(client_id)');
+  }
+
+  if (!names.has('language')) {
+    await db.execute("ALTER TABLE documents ADD COLUMN language TEXT NOT NULL DEFAULT 'id'");
+  }
+
+  if (!names.has('customer_company')) {
+    await db.execute("ALTER TABLE documents ADD COLUMN customer_company TEXT NOT NULL DEFAULT ''");
+  }
+
+  await db.execute('CREATE INDEX IF NOT EXISTS idx_documents_client_id ON documents(client_id)');
+}
+
+async function ensureClientColumns(db: Database): Promise<void> {
+  const columns = await db.select<ColumnRow[]>('PRAGMA table_info(clients)');
+  const names = new Set(columns.map((column) => column.name));
+
+  if (!names.has('company_name')) {
+    await db.execute("ALTER TABLE clients ADD COLUMN company_name TEXT NOT NULL DEFAULT ''");
   }
 }
 
@@ -296,11 +321,13 @@ export async function initDatabase(): Promise<void> {
     id TEXT PRIMARY KEY,
     document_type TEXT NOT NULL,
     document_number TEXT NOT NULL,
+    language TEXT NOT NULL DEFAULT 'id',
     issue_date TEXT NOT NULL,
     due_date TEXT NOT NULL,
     payment_method TEXT NOT NULL,
     client_id TEXT NOT NULL DEFAULT '',
     customer_name TEXT NOT NULL,
+    customer_company TEXT NOT NULL DEFAULT '',
     customer_detail TEXT NOT NULL,
     service_note TEXT NOT NULL,
     tax INTEGER NOT NULL DEFAULT 0,
@@ -316,6 +343,7 @@ export async function initDatabase(): Promise<void> {
   await db.execute(`CREATE TABLE IF NOT EXISTS clients (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    company_name TEXT NOT NULL DEFAULT '',
     detail TEXT NOT NULL DEFAULT '',
     address TEXT NOT NULL DEFAULT '',
     phone TEXT NOT NULL DEFAULT '',
@@ -324,7 +352,8 @@ export async function initDatabase(): Promise<void> {
     updated_at TEXT NOT NULL
   )`);
 
-  await ensureDocumentClientColumn(db);
+  await ensureDocumentColumns(db);
+  await ensureClientColumns(db);
   await db.execute('CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)');
   await db.execute('CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(document_type)');
   await db.execute('CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)');
@@ -358,6 +387,11 @@ export async function loadCompanySettings(): Promise<CompanySettings> {
       defaultOfferNote: parsed.defaultOfferNote || defaultCompanySettings.defaultOfferNote,
       defaultInvoiceNote: parsed.defaultInvoiceNote || legacyNote || defaultCompanySettings.defaultInvoiceNote,
       defaultReceiptNote: parsed.defaultReceiptNote || defaultCompanySettings.defaultReceiptNote,
+      appLanguage: parsed.appLanguage === 'en' ? 'en' : 'id',
+      defaultDocumentLanguage: parsed.defaultDocumentLanguage === 'en' ? 'en' : 'id',
+      defaultOfferNoteEn: parsed.defaultOfferNoteEn || defaultCompanySettings.defaultOfferNoteEn,
+      defaultInvoiceNoteEn: parsed.defaultInvoiceNoteEn || defaultCompanySettings.defaultInvoiceNoteEn,
+      defaultReceiptNoteEn: parsed.defaultReceiptNoteEn || defaultCompanySettings.defaultReceiptNoteEn,
       offerColor: parsed.offerColor || defaultCompanySettings.offerColor,
       invoiceColor: parsed.invoiceColor || defaultCompanySettings.invoiceColor,
       receiptColor: parsed.receiptColor || defaultCompanySettings.receiptColor
@@ -387,6 +421,7 @@ export async function upsertClient(id: string | null, draft: ClientDraft): Promi
   const now = new Date().toISOString();
   const clientId = id || createKey();
   const name = draft.name.trim();
+  const companyName = draft.companyName.trim();
 
   if (!name) {
     throw new Error('Nama klien wajib diisi.');
@@ -396,14 +431,14 @@ export async function upsertClient(id: string | null, draft: ClientDraft): Promi
 
   if (current.length === 0) {
     await db.execute(
-      `INSERT INTO clients(id, name, detail, address, phone, email, created_at, updated_at)
-      VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-      [clientId, name, draft.detail.trim(), draft.address.trim(), draft.phone.trim(), draft.email.trim(), now, now]
+      `INSERT INTO clients(id, name, company_name, detail, address, phone, email, created_at, updated_at)
+      VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [clientId, name, companyName, draft.detail.trim(), draft.address.trim(), draft.phone.trim(), draft.email.trim(), now, now]
     );
   } else {
     await db.execute(
-      `UPDATE clients SET name = ?, detail = ?, address = ?, phone = ?, email = ?, updated_at = ? WHERE id = ?`,
-      [name, draft.detail.trim(), draft.address.trim(), draft.phone.trim(), draft.email.trim(), now, clientId]
+      `UPDATE clients SET name = ?, company_name = ?, detail = ?, address = ?, phone = ?, email = ?, updated_at = ? WHERE id = ?`,
+      [name, companyName, draft.detail.trim(), draft.address.trim(), draft.phone.trim(), draft.email.trim(), now, clientId]
     );
   }
 
@@ -490,18 +525,20 @@ export async function upsertDocument(id: string | null, draft: DocumentDraft, st
   if (current.length === 0) {
     await db.execute(
       `INSERT INTO documents(
-        id, document_type, document_number, issue_date, due_date, payment_method, client_id, customer_name, customer_detail, service_note,
+        id, document_type, document_number, language, issue_date, due_date, payment_method, client_id, customer_name, customer_company, customer_detail, service_note,
         tax, subtotal, total, status, items_json, created_at, updated_at
-      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         documentId,
         draft.documentType,
         draft.documentNumber,
+        draft.language,
         draft.issueDate,
         draft.dueDate,
         draft.paymentMethod,
         draft.clientId,
         draft.customerName,
+        draft.customerCompany,
         draft.customerDetail,
         draft.serviceNote,
         draft.tax,
@@ -516,17 +553,19 @@ export async function upsertDocument(id: string | null, draft: DocumentDraft, st
   } else {
     await db.execute(
       `UPDATE documents SET
-        document_type = ?, document_number = ?, issue_date = ?, due_date = ?, payment_method = ?, client_id = ?, customer_name = ?, customer_detail = ?,
+        document_type = ?, document_number = ?, language = ?, issue_date = ?, due_date = ?, payment_method = ?, client_id = ?, customer_name = ?, customer_company = ?, customer_detail = ?,
         service_note = ?, tax = ?, subtotal = ?, total = ?, status = ?, items_json = ?, updated_at = ?
       WHERE id = ?`,
       [
         draft.documentType,
         draft.documentNumber,
+        draft.language,
         draft.issueDate,
         draft.dueDate,
         draft.paymentMethod,
         draft.clientId,
         draft.customerName,
+        draft.customerCompany,
         draft.customerDetail,
         draft.serviceNote,
         draft.tax,

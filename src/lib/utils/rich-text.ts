@@ -3,6 +3,21 @@ const inlineTags = new Set(['strong', 'b', 'em', 'i', 'u']);
 const listTags = new Set(['ul', 'ol']);
 const allowedTags = new Set(['p', 'div', 'br', 'strong', 'b', 'em', 'i', 'u', 'ul', 'ol', 'li', 'span']);
 
+function decodeEntities(value: string): string {
+  let current = value;
+
+  for (let index = 0; index < 8; index += 1) {
+    const parser = new DOMParser();
+    const parsed = parser.parseFromString(`<textarea>${current}</textarea>`, 'text/html');
+    const decoded = parsed.querySelector('textarea')?.value ?? current;
+
+    if (decoded === current) break;
+    current = decoded;
+  }
+
+  return current.replace(/ /g, ' ');
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -23,11 +38,11 @@ function prepareSource(value: string): string {
 
   if (hasHtml(trimmed)) return trimmed;
 
-  return escapeHtml(trimmed).replace(/\r\n/g, '\n').replace(/\n/g, '<br>');
+  return escapeHtml(decodeEntities(trimmed)).replace(/\r\n/g, '\n').replace(/\n/g, '<br>');
 }
 
 function sanitizeNode(node: Node): string {
-  if (node.nodeType === Node.TEXT_NODE) return escapeHtml(node.textContent || '');
+  if (node.nodeType === Node.TEXT_NODE) return escapeHtml(decodeEntities(node.textContent || ''));
   if (node.nodeType !== Node.ELEMENT_NODE) return '';
 
   const element = node as Element;
@@ -85,6 +100,36 @@ function splitCleanLines(value: string): string[] {
     .filter(Boolean);
 }
 
+function directNodeText(element: Element): string {
+  return Array.from(element.childNodes)
+    .filter((node) => {
+      if (node.nodeType !== Node.ELEMENT_NODE) return true;
+      const tag = (node as Element).tagName.toLowerCase();
+      return tag !== 'ul' && tag !== 'ol';
+    })
+    .map(nodeText)
+    .join('');
+}
+
+function appendListLines(element: Element, lines: string[], depth: number): void {
+  const ordered = element.tagName.toLowerCase() === 'ol';
+
+  Array.from(element.children).forEach((child, index) => {
+    if (child.tagName.toLowerCase() !== 'li') return;
+
+    const text = splitCleanLines(directNodeText(child)).join(' ');
+    const indent = depth > 0 ? `${'  '.repeat(depth)}` : '';
+    const prefix = ordered ? `${index + 1}. ` : '• ';
+
+    if (text) lines.push(`${indent}${prefix}${text}`);
+
+    Array.from(child.children).forEach((nested) => {
+      const tag = nested.tagName.toLowerCase();
+      if (tag === 'ul' || tag === 'ol') appendListLines(nested, lines, depth + 1);
+    });
+  });
+}
+
 export function richTextToLines(value: string): string[] {
   const sanitized = sanitizeRichText(value);
 
@@ -110,16 +155,12 @@ export function richTextToLines(value: string): string[] {
     const tag = element.tagName.toLowerCase();
 
     if (tag === 'ul' || tag === 'ol') {
-      Array.from(element.children).forEach((child, index) => {
-        const text = splitCleanLines(nodeText(child)).join(' ');
-        if (!text) return;
-        lines.push(tag === 'ol' ? `${index + 1}. ${text}` : `• ${text}`);
-      });
+      appendListLines(element, lines, 0);
       return;
     }
 
     if (tag === 'li') {
-      const text = splitCleanLines(nodeText(element)).join(' ');
+      const text = splitCleanLines(directNodeText(element)).join(' ');
       if (text) lines.push(`• ${text}`);
       return;
     }
