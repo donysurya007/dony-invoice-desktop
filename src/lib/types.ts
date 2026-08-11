@@ -43,7 +43,6 @@ export type CompanySettings = {
 export type ClientDraft = {
   name: string;
   companyName: string;
-  detail: string;
   address: string;
   phone: string;
   email: string;
@@ -74,7 +73,9 @@ export type DocumentDraft = {
   clientId: string;
   customerName: string;
   customerCompany: string;
-  customerDetail: string;
+  customerAddress: string;
+  customerPhone: string;
+  customerEmail: string;
   serviceNote: string;
   tax: number;
   items: DocumentItem[];
@@ -101,7 +102,7 @@ export type ToastMessage = {
   type: 'success' | 'error' | 'info';
 };
 
-export type InvoiceDraft = Omit<DocumentDraft, 'documentType' | 'documentNumber' | 'language' | 'clientId' | 'customerCompany'> & {
+export type InvoiceDraft = Omit<DocumentDraft, 'documentType' | 'documentNumber' | 'language' | 'clientId'> & {
   invoiceNumber: string;
 };
 

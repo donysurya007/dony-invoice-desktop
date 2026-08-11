@@ -22,7 +22,6 @@
     return {
       name: '',
       companyName: '',
-      detail: '',
       address: '',
       phone: '',
       email: ''
@@ -34,7 +33,6 @@
     draft = {
       name: client.name,
       companyName: client.companyName,
-      detail: client.detail,
       address: client.address,
       phone: client.phone,
       email: client.email
@@ -59,13 +57,11 @@
   }
 
   function getClientSubheading(client: ClientRecord): string {
-    if (client.companyName) return client.companyName;
-
-    return client.detail || client.address || '-';
+    return client.companyName || client.address;
   }
 
   function getClientMeta(client: ClientRecord): string {
-    return [client.detail, client.address, client.phone, client.email].filter(Boolean).join(' · ') || '-';
+    return [client.address, client.phone, client.email].filter(Boolean).join(' · ');
   }
 </script>
 
@@ -87,12 +83,7 @@
         <input bind:value={draft.companyName} placeholder={isEnglish ? 'Example: Bali Kennel' : 'Contoh: Bali Kennel'} />
       </label>
 
-      <label>
-        <span>{isEnglish ? 'Client Details' : 'Keterangan Klien'}</span>
-        <input bind:value={draft.detail} />
-      </label>
-
-      <label>
+      <label class="full-field">
         <span>{isEnglish ? 'Address' : 'Alamat'}</span>
         <input bind:value={draft.address} />
       </label>
@@ -126,8 +117,12 @@
           <article class="client-item professional-client-item">
             <button type="button" on:click={() => editClient(client)}>
               <strong>{getClientHeading(client)}</strong>
-              <span>{getClientSubheading(client)}</span>
-              <small>{getClientMeta(client)}</small>
+              {#if getClientSubheading(client)}
+                <span>{getClientSubheading(client)}</span>
+              {/if}
+              {#if getClientMeta(client)}
+                <small>{getClientMeta(client)}</small>
+              {/if}
             </button>
             <AppButton variant="danger" on:click={() => deleteClient(client)}>{isEnglish ? 'Delete' : 'Hapus'}</AppButton>
           </article>

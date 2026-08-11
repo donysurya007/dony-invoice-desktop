@@ -2660,3 +2660,60 @@ label span {
     margin-left: 44px !important;
   }
 }
+
+.client-address-field {
+  grid-column: 1 / -1;
+}
+
+.bill-to {
+  padding: 26px;
+}
+
+.bill-to strong {
+  margin-top: 24px;
+}
+
+.bill-to .recipient-company {
+  margin-top: 7px;
+  color: #4f5f6a;
+  font-weight: 800;
+}
+
+.bill-to .recipient-address {
+  margin-top: 7px;
+  color: #26333d;
+  line-height: 1.4;
+}
+
+.recipient-contact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 7px;
+}
+
+.invoice-box .recipient-contact span {
+  display: inline;
+  color: #6b7b86;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+@media print {
+  .bill-to {
+    padding: 26px !important;
+  }
+
+  .bill-to strong {
+    margin-top: 24px !important;
+  }
+
+  .bill-to .recipient-company,
+  .bill-to .recipient-address {
+    margin-top: 7px !important;
+  }
+
+  .invoice-box .recipient-contact span {
+    font-size: 10px !important;
+  }
+}

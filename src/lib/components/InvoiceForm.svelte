@@ -81,8 +81,23 @@
     </label>
 
     <label>
-      <span>Keterangan Pelanggan</span>
-      <input bind:value={draft.customerDetail} />
+      <span>Nama Perusahaan</span>
+      <input bind:value={draft.customerCompany} />
+    </label>
+
+    <label class="full-field">
+      <span>Alamat</span>
+      <input bind:value={draft.customerAddress} />
+    </label>
+
+    <label>
+      <span>Telepon</span>
+      <input bind:value={draft.customerPhone} />
+    </label>
+
+    <label>
+      <span>Email</span>
+      <input type="email" bind:value={draft.customerEmail} />
     </label>
   </div>
 

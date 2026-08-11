@@ -32,8 +32,11 @@
   <div class="invoice-top-grid">
     <div class="invoice-box bill-to">
       <span>TAGIHAN KEPADA</span>
-      <strong>{invoice.customerName || '-'}</strong>
-      <p>{invoice.customerDetail || '-'}</p>
+      {#if invoice.customerName}<strong>{invoice.customerName}</strong>{/if}
+      {#if invoice.customerCompany}<p class="recipient-company">{invoice.customerCompany}</p>{/if}
+      {#if invoice.customerAddress}<p>{invoice.customerAddress}</p>{/if}
+      {#if invoice.customerPhone}<p>Telepon: {invoice.customerPhone}</p>{/if}
+      {#if invoice.customerEmail}<p>Email: {invoice.customerEmail}</p>{/if}
     </div>
 
     <div class="invoice-meta-table">

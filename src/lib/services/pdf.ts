@@ -238,20 +238,40 @@ function drawDocumentHeader(page: PDFPage, context: PdfContext, pageIndex: numbe
 
 function drawRecipientAndMeta(page: PDFPage, context: PdfContext): void {
   const config = getDocumentConfig(context.document.documentType, context.document.language);
+  const text = getDocumentText(context.document.language);
   const left = px(documentLayout.left);
+  const contentX = left + px(20);
+  const contentWidth = px(254);
 
   drawBox(page, left, yTop(184, 150), px(306), px(150));
-  drawText(page, config.recipientLabel, left + px(20), yTop(216), 8, context.fonts.bold, context.accent);
-  drawText(page, context.document.customerName || '-', left + px(20), yTop(255), 10, context.fonts.bold, black);
+  drawText(page, config.recipientLabel, contentX, yTop(216), 8, context.fonts.bold, context.accent);
 
-  let recipientTop = 279;
+  let recipientTop = 252;
 
-  if (context.document.customerCompany) {
-    drawWrapped(page, context.document.customerCompany, left + px(20), yTop(recipientTop), 8, context.fonts.regular, px(254), 11, gray);
-    recipientTop += 24;
+  if (context.document.customerName) {
+    drawText(page, context.document.customerName, contentX, yTop(recipientTop), 10, context.fonts.bold, black);
+    recipientTop += 23;
   }
 
-  drawWrapped(page, context.document.customerDetail || '-', left + px(20), yTop(recipientTop), 8, context.fonts.regular, px(254), 11, black);
+  if (context.document.customerCompany) {
+    drawText(page, context.document.customerCompany, contentX, yTop(recipientTop), 8, context.fonts.bold, gray);
+    recipientTop += 19;
+  }
+
+  if (context.document.customerAddress) {
+    const addressLines = wrapText(context.document.customerAddress, context.fonts.regular, 7.5, contentWidth);
+    drawWrapped(page, context.document.customerAddress, contentX, yTop(recipientTop), 7.5, context.fonts.regular, contentWidth, 10, black);
+    recipientTop += Math.min(addressLines.length, 2) * 11 + 4;
+  }
+
+  const contactParts = [
+    context.document.customerPhone ? `${text.clientPhone}: ${context.document.customerPhone}` : '',
+    context.document.customerEmail ? `${text.clientEmail}: ${context.document.customerEmail}` : ''
+  ].filter(Boolean);
+
+  if (contactParts.length > 0) {
+    drawWrapped(page, contactParts.join(' · '), contentX, yTop(recipientTop), 7, context.fonts.regular, contentWidth, 9, gray);
+  }
 
   drawMetaTable(
     page,

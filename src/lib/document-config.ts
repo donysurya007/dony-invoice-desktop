@@ -6,7 +6,6 @@ export type DocumentConfig = {
   numberPrefix: string;
   numberInputLabel: string;
   recipientLabel: string;
-  detailLabel: string;
   secondaryDateLabel: string;
   tableDescriptionLabel: string;
   totalLabel: string;
@@ -22,6 +21,9 @@ export type DocumentText = {
   paymentMethod: string;
   clientName: string;
   clientCompany: string;
+  clientAddress: string;
+  clientPhone: string;
+  clientEmail: string;
   selectClient: string;
   manualInput: string;
   documentLanguage: string;
@@ -36,6 +38,8 @@ export type DocumentText = {
   accountName: string;
   notes: string;
   scopeOfWork: string;
+  scopeAttachment: string;
+  summaryTitle: string;
   page: string;
   of: string;
 };
@@ -47,7 +51,6 @@ const idConfigs: Record<DocumentType, DocumentConfig> = {
     numberPrefix: 'PNW',
     numberInputLabel: 'Nomor Penawaran',
     recipientLabel: 'PENAWARAN KEPADA',
-    detailLabel: 'Keterangan Klien',
     secondaryDateLabel: 'Berlaku Sampai',
     tableDescriptionLabel: 'Deskripsi Penawaran',
     totalLabel: 'Total Penawaran',
@@ -62,7 +65,6 @@ const idConfigs: Record<DocumentType, DocumentConfig> = {
     numberPrefix: 'INV',
     numberInputLabel: 'Nomor Invoice',
     recipientLabel: 'TAGIHAN KEPADA',
-    detailLabel: 'Keterangan Klien',
     secondaryDateLabel: 'Jatuh Tempo',
     tableDescriptionLabel: 'Deskripsi Layanan',
     totalLabel: 'Total Tagihan',
@@ -77,7 +79,6 @@ const idConfigs: Record<DocumentType, DocumentConfig> = {
     numberPrefix: 'KWT',
     numberInputLabel: 'Nomor Kwitansi',
     recipientLabel: 'DITERIMA DARI',
-    detailLabel: 'Keterangan Pembayaran',
     secondaryDateLabel: 'Tanggal Bayar',
     tableDescriptionLabel: 'Deskripsi Pembayaran',
     totalLabel: 'Total Diterima',
@@ -95,7 +96,6 @@ const enConfigs: Record<DocumentType, DocumentConfig> = {
     numberPrefix: 'PNW',
     numberInputLabel: 'Quotation Number',
     recipientLabel: 'QUOTATION FOR',
-    detailLabel: 'Client Details',
     secondaryDateLabel: 'Valid Until',
     tableDescriptionLabel: 'Quotation Description',
     totalLabel: 'Quotation Total',
@@ -110,7 +110,6 @@ const enConfigs: Record<DocumentType, DocumentConfig> = {
     numberPrefix: 'INV',
     numberInputLabel: 'Invoice Number',
     recipientLabel: 'BILL TO',
-    detailLabel: 'Client Details',
     secondaryDateLabel: 'Due Date',
     tableDescriptionLabel: 'Service Description',
     totalLabel: 'Amount Due',
@@ -125,7 +124,6 @@ const enConfigs: Record<DocumentType, DocumentConfig> = {
     numberPrefix: 'KWT',
     numberInputLabel: 'Receipt Number',
     recipientLabel: 'RECEIVED FROM',
-    detailLabel: 'Payment Details',
     secondaryDateLabel: 'Payment Date',
     tableDescriptionLabel: 'Payment Description',
     totalLabel: 'Amount Received',
@@ -143,6 +141,9 @@ const documentTexts: Record<DocumentLanguage, DocumentText> = {
     paymentMethod: 'METODE BAYAR',
     clientName: 'Nama Klien',
     clientCompany: 'Nama Perusahaan Klien',
+    clientAddress: 'Alamat',
+    clientPhone: 'Telepon',
+    clientEmail: 'Email',
     selectClient: 'Pilih Klien',
     manualInput: 'Input manual',
     documentLanguage: 'Bahasa Dokumen',
@@ -157,6 +158,8 @@ const documentTexts: Record<DocumentLanguage, DocumentText> = {
     accountName: 'Nama',
     notes: 'CATATAN',
     scopeOfWork: 'LINGKUP PEKERJAAN',
+    scopeAttachment: 'Lampiran',
+    summaryTitle: 'RINGKASAN TAGIHAN',
     page: 'Halaman',
     of: 'dari'
   },
@@ -166,6 +169,9 @@ const documentTexts: Record<DocumentLanguage, DocumentText> = {
     paymentMethod: 'PAYMENT METHOD',
     clientName: 'Client Name',
     clientCompany: 'Client Company Name',
+    clientAddress: 'Address',
+    clientPhone: 'Phone',
+    clientEmail: 'Email',
     selectClient: 'Select Client',
     manualInput: 'Manual input',
     documentLanguage: 'Document Language',
@@ -180,6 +186,8 @@ const documentTexts: Record<DocumentLanguage, DocumentText> = {
     accountName: 'Name',
     notes: 'NOTES',
     scopeOfWork: 'SCOPE OF WORK',
+    scopeAttachment: 'Attached to',
+    summaryTitle: 'PAYMENT SUMMARY',
     page: 'Page',
     of: 'of'
   }

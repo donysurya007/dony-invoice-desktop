@@ -51,6 +51,9 @@ type DocumentRow = {
   client_id?: string | null;
   customer_name: string;
   customer_company?: string | null;
+  customer_address?: string | null;
+  customer_phone?: string | null;
+  customer_email?: string | null;
   customer_detail: string;
   service_note: string;
   tax: number;
@@ -118,7 +121,9 @@ function mapDocument(row: DocumentRow): DocumentRecord {
     clientId: row.client_id || '',
     customerName: row.customer_name,
     customerCompany: row.customer_company || '',
-    customerDetail: row.customer_detail,
+    customerAddress: row.customer_address || '',
+    customerPhone: row.customer_phone || '',
+    customerEmail: row.customer_email || '',
     serviceNote: row.service_note,
     tax: Number(row.tax) || 0,
     items: parseItems(row.items_json),
@@ -135,7 +140,6 @@ function mapClient(row: ClientRow): ClientRecord {
     id: row.id,
     name: row.name,
     companyName: row.company_name || '',
-    detail: row.detail,
     address: row.address,
     phone: row.phone,
     email: row.email,
@@ -160,6 +164,18 @@ async function ensureDocumentColumns(db: Database): Promise<void> {
     await db.execute("ALTER TABLE documents ADD COLUMN customer_company TEXT NOT NULL DEFAULT ''");
   }
 
+  if (!names.has('customer_address')) {
+    await db.execute("ALTER TABLE documents ADD COLUMN customer_address TEXT NOT NULL DEFAULT ''");
+  }
+
+  if (!names.has('customer_phone')) {
+    await db.execute("ALTER TABLE documents ADD COLUMN customer_phone TEXT NOT NULL DEFAULT ''");
+  }
+
+  if (!names.has('customer_email')) {
+    await db.execute("ALTER TABLE documents ADD COLUMN customer_email TEXT NOT NULL DEFAULT ''");
+  }
+
   await db.execute('CREATE INDEX IF NOT EXISTS idx_documents_client_id ON documents(client_id)');
 }
 
@@ -170,6 +186,24 @@ async function ensureClientColumns(db: Database): Promise<void> {
   if (!names.has('company_name')) {
     await db.execute("ALTER TABLE clients ADD COLUMN company_name TEXT NOT NULL DEFAULT ''");
   }
+}
+
+async function backfillDocumentRecipientContacts(db: Database): Promise<void> {
+  await db.execute(`UPDATE documents
+    SET customer_company = COALESCE(NULLIF(customer_company, ''), (SELECT company_name FROM clients WHERE clients.id = documents.client_id), '')
+    WHERE client_id <> '' AND customer_company = ''`);
+
+  await db.execute(`UPDATE documents
+    SET customer_address = COALESCE((SELECT address FROM clients WHERE clients.id = documents.client_id), '')
+    WHERE client_id <> '' AND customer_address = ''`);
+
+  await db.execute(`UPDATE documents
+    SET customer_phone = COALESCE((SELECT phone FROM clients WHERE clients.id = documents.client_id), '')
+    WHERE client_id <> '' AND customer_phone = ''`);
+
+  await db.execute(`UPDATE documents
+    SET customer_email = COALESCE((SELECT email FROM clients WHERE clients.id = documents.client_id), '')
+    WHERE client_id <> '' AND customer_email = ''`);
 }
 
 async function tableExists(db: Database, tableName: string): Promise<boolean> {
@@ -328,7 +362,10 @@ export async function initDatabase(): Promise<void> {
     client_id TEXT NOT NULL DEFAULT '',
     customer_name TEXT NOT NULL,
     customer_company TEXT NOT NULL DEFAULT '',
-    customer_detail TEXT NOT NULL,
+    customer_address TEXT NOT NULL DEFAULT '',
+    customer_phone TEXT NOT NULL DEFAULT '',
+    customer_email TEXT NOT NULL DEFAULT '',
+    customer_detail TEXT NOT NULL DEFAULT '',
     service_note TEXT NOT NULL,
     tax INTEGER NOT NULL DEFAULT 0,
     subtotal INTEGER NOT NULL DEFAULT 0,
@@ -362,6 +399,7 @@ export async function initDatabase(): Promise<void> {
 
   await migrateLegacyDatabase(db);
   await migrateInvoices();
+  await backfillDocumentRecipientContacts(db);
 
   const rows = await db.select<SettingsRow[]>('SELECT value FROM settings WHERE key = ?', ['company']);
 
@@ -432,13 +470,13 @@ export async function upsertClient(id: string | null, draft: ClientDraft): Promi
   if (current.length === 0) {
     await db.execute(
       `INSERT INTO clients(id, name, company_name, detail, address, phone, email, created_at, updated_at)
-      VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [clientId, name, companyName, draft.detail.trim(), draft.address.trim(), draft.phone.trim(), draft.email.trim(), now, now]
+      VALUES(?, ?, ?, '', ?, ?, ?, ?, ?)`,
+      [clientId, name, companyName, draft.address.trim(), draft.phone.trim(), draft.email.trim(), now, now]
     );
   } else {
     await db.execute(
-      `UPDATE clients SET name = ?, company_name = ?, detail = ?, address = ?, phone = ?, email = ?, updated_at = ? WHERE id = ?`,
-      [name, companyName, draft.detail.trim(), draft.address.trim(), draft.phone.trim(), draft.email.trim(), now, clientId]
+      `UPDATE clients SET name = ?, company_name = ?, address = ?, phone = ?, email = ?, updated_at = ? WHERE id = ?`,
+      [name, companyName, draft.address.trim(), draft.phone.trim(), draft.email.trim(), now, clientId]
     );
   }
 
@@ -525,9 +563,9 @@ export async function upsertDocument(id: string | null, draft: DocumentDraft, st
   if (current.length === 0) {
     await db.execute(
       `INSERT INTO documents(
-        id, document_type, document_number, language, issue_date, due_date, payment_method, client_id, customer_name, customer_company, customer_detail, service_note,
+        id, document_type, document_number, language, issue_date, due_date, payment_method, client_id, customer_name, customer_company, customer_address, customer_phone, customer_email, customer_detail, service_note,
         tax, subtotal, total, status, items_json, created_at, updated_at
-      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         documentId,
         draft.documentType,
@@ -539,7 +577,9 @@ export async function upsertDocument(id: string | null, draft: DocumentDraft, st
         draft.clientId,
         draft.customerName,
         draft.customerCompany,
-        draft.customerDetail,
+        draft.customerAddress,
+        draft.customerPhone,
+        draft.customerEmail,
         draft.serviceNote,
         draft.tax,
         subtotal,
@@ -553,7 +593,7 @@ export async function upsertDocument(id: string | null, draft: DocumentDraft, st
   } else {
     await db.execute(
       `UPDATE documents SET
-        document_type = ?, document_number = ?, language = ?, issue_date = ?, due_date = ?, payment_method = ?, client_id = ?, customer_name = ?, customer_company = ?, customer_detail = ?,
+        document_type = ?, document_number = ?, language = ?, issue_date = ?, due_date = ?, payment_method = ?, client_id = ?, customer_name = ?, customer_company = ?, customer_address = ?, customer_phone = ?, customer_email = ?, customer_detail = '',
         service_note = ?, tax = ?, subtotal = ?, total = ?, status = ?, items_json = ?, updated_at = ?
       WHERE id = ?`,
       [
@@ -566,7 +606,9 @@ export async function upsertDocument(id: string | null, draft: DocumentDraft, st
         draft.clientId,
         draft.customerName,
         draft.customerCompany,
-        draft.customerDetail,
+        draft.customerAddress,
+        draft.customerPhone,
+        draft.customerEmail,
         draft.serviceNote,
         draft.tax,
         subtotal,

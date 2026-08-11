@@ -39,7 +39,7 @@
   }
 
   function getRecipientMeta(document: DocumentRecord): string {
-    return document.customerCompany || document.customerDetail || '-';
+    return document.customerCompany || document.customerAddress || '-';
   }
 </script>
 

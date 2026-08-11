@@ -38,10 +38,6 @@
     draft.items = draft.items.filter((_, itemIndex) => itemIndex !== index);
   }
 
-  function buildClientDetail(client: ClientRecord): string {
-    return [client.detail, client.address, client.phone, client.email].filter(Boolean).join(' · ');
-  }
-
   function getClientOptionLabel(client: ClientRecord): string {
     if (client.companyName) return `${client.name} — ${client.companyName}`;
 
@@ -59,7 +55,9 @@
 
     draft.customerName = client.name;
     draft.customerCompany = client.companyName;
-    draft.customerDetail = buildClientDetail(client);
+    draft.customerAddress = client.address;
+    draft.customerPhone = client.phone;
+    draft.customerEmail = client.email;
   }
 
   function clearClientSelection(): void {
@@ -159,9 +157,19 @@
           <input bind:value={draft.customerCompany} on:input={clearClientSelection} placeholder={isEnglish ? 'Example: Bali Kennel' : 'Contoh: Bali Kennel'} />
         </label>
 
+        <label class="client-address-field">
+          <span>{text.clientAddress}</span>
+          <input bind:value={draft.customerAddress} on:input={clearClientSelection} placeholder={isEnglish ? 'Client or company address' : 'Alamat klien atau perusahaan'} />
+        </label>
+
         <label>
-          <span>{config.detailLabel}</span>
-          <input bind:value={draft.customerDetail} on:input={clearClientSelection} placeholder={isEnglish ? 'Address, phone, email, or other details' : 'Alamat, telepon, email, atau keterangan lain'} />
+          <span>{text.clientPhone}</span>
+          <input bind:value={draft.customerPhone} on:input={clearClientSelection} />
+        </label>
+
+        <label>
+          <span>{text.clientEmail}</span>
+          <input type="email" bind:value={draft.customerEmail} on:input={clearClientSelection} />
         </label>
       </div>
     </section>

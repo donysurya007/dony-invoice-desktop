@@ -85,11 +85,25 @@
         <div class="invoice-top-grid">
           <div class="invoice-box bill-to">
             <span>{config.recipientLabel}</span>
-            <strong>{document.customerName || '-'}</strong>
+            {#if document.customerName}
+              <strong>{document.customerName}</strong>
+            {/if}
             {#if document.customerCompany}
               <p class="recipient-company">{document.customerCompany}</p>
             {/if}
-            <p class="recipient-detail">{document.customerDetail || '-'}</p>
+            {#if document.customerAddress}
+              <p class="recipient-address">{document.customerAddress}</p>
+            {/if}
+            {#if document.customerPhone || document.customerEmail}
+              <div class="recipient-contact">
+                {#if document.customerPhone}
+                  <span>{text.clientPhone}: {document.customerPhone}</span>
+                {/if}
+                {#if document.customerEmail}
+                  <span>{text.clientEmail}: {document.customerEmail}</span>
+                {/if}
+              </div>
+            {/if}
           </div>
 
           <div class="invoice-meta-table">
