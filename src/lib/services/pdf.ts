@@ -1,11 +1,29 @@
 import { invoke } from '@tauri-apps/api/core';
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib';
-import { getDefaultDocumentNote, getDocumentConfig, getDocumentItemUnitLabel, getDocumentText, getPaymentMethodLabel } from '$lib/document-config';
+import {
+  getDefaultDocumentNote,
+  getDocumentConfig,
+  getDocumentItemUnitLabel,
+  getDocumentQuantityColumnLabel,
+  getDocumentText,
+  getDocumentUnitPriceColumnLabel,
+  getPaymentMethodLabel,
+  shouldShowDocumentItemUnit
+} from '$lib/document-config';
 import type { CompanySettings, DocumentDraft } from '$lib/types';
 import { calculateSubtotal, calculateTotal, cleanPdfFileName, formatDocumentDate } from '$lib/utils/format';
 import { terbilangRupiah } from '$lib/utils/number-to-words';
 import { documentAccentColor, hexToUnitRgb } from '$lib/utils/color';
-import { documentLayout, getPageTableEndTop, paginateDocument, type DocumentPrintPage, type PaginatedDocumentItem } from '$lib/utils/document-pagination';
+import {
+  documentLayout,
+  getPageContentEndTop,
+  getPageScopeStartTop,
+  paginateDocument,
+  type DocumentPrintPage,
+  type PaginatedDocumentScopeSection,
+  type PaginatedDocumentTableItem,
+  type PaginatedScopeLine
+} from '$lib/utils/document-pagination';
 
 const navy = rgb(0.02, 0.21, 0.29);
 const gray = rgb(0.38, 0.43, 0.48);
@@ -97,19 +115,6 @@ function drawWrapped(page: PDFPage, text: string, x: number, y: number, size: nu
   for (const line of wrapText(text, font, size, maxWidth)) {
     drawText(page, line, x, currentY, size, font, color);
     currentY -= lineHeight;
-  }
-
-  return currentY;
-}
-
-function drawWrappedLines(page: PDFPage, lines: string[], x: number, y: number, size: number, font: PDFFont, maxWidth: number, lineHeight: number, color = black): number {
-  let currentY = y;
-
-  for (const line of lines.length > 0 ? lines : ['-']) {
-    for (const wrappedLine of wrapText(line, font, size, maxWidth)) {
-      drawText(page, wrappedLine, x, currentY, size, font, color);
-      currentY -= lineHeight;
-    }
   }
 
   return currentY;
@@ -282,44 +287,117 @@ function drawTableHeader(page: PDFPage, context: PdfContext, top: number): void 
   const metrics = getTableMetrics();
   const headerY = yTop(top, documentLayout.tableHeaderHeight);
   const headerHeight = px(documentLayout.tableHeaderHeight);
+  const units = context.document.items.map((item) => item.unit);
+  const quantityLabel = getDocumentQuantityColumnLabel(units, context.document.language);
+  const unitPriceLabel = getDocumentUnitPriceColumnLabel(units, context.document.language);
+  const text = getDocumentText(context.document.language);
 
   page.drawRectangle({ x: metrics.x, y: headerY, width: metrics.width, height: headerHeight, color: navy });
   drawCenteredText(page, config.tableDescriptionLabel, metrics.x + metrics.descriptionWidth / 2, headerY + px(20), 8, context.fonts.bold, white);
-  const text = getDocumentText(context.document.language);
-  drawCenteredText(page, text.quantityUnit, metrics.x + metrics.descriptionWidth + metrics.quantityWidth / 2, headerY + px(20), 8, context.fonts.bold, white);
-  drawCenteredText(page, text.unitPrice, metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth / 2, headerY + px(20), 8, context.fonts.bold, white);
+  drawCenteredText(page, quantityLabel, metrics.x + metrics.descriptionWidth + metrics.quantityWidth / 2, headerY + px(20), 8, context.fonts.bold, white);
+  drawCenteredText(page, unitPriceLabel, metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth / 2, headerY + px(20), 8, context.fonts.bold, white);
   drawCenteredText(page, text.total, metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth + metrics.totalWidth / 2, headerY + px(20), 8, context.fonts.bold, white);
 }
 
-function drawTableItem(page: PDFPage, context: PdfContext, item: PaginatedDocumentItem, top: number): number {
+function drawTableItem(page: PDFPage, context: PdfContext, item: PaginatedDocumentTableItem, top: number): number {
   const metrics = getTableMetrics();
   const itemHeight = item.rowHeight;
   const itemY = yTop(top, itemHeight);
   const lineTotal = item.quantity * item.unitPrice;
   const descriptionX = metrics.x + px(20);
   const descriptionMaxWidth = metrics.descriptionWidth - px(40);
-  const continuationLabel = context.document.language === 'en' ? 'continued' : 'lanjutan';
-  const description = item.continuation ? `${item.description} - ${continuationLabel}` : item.description;
+  const units = context.document.items.map((documentItem) => documentItem.unit);
+  const showItemUnit = shouldShowDocumentItemUnit(units);
+  const quantityValue = showItemUnit ? `${item.quantity} ${getDocumentItemUnitLabel(item.unit, context.document.language)}` : `${item.quantity}`;
+  const unitPriceValue = showItemUnit && item.unit === 'mandays' ? `${formatRupiah(item.unitPrice)} / Manday` : formatRupiah(item.unitPrice);
 
   drawTableCell(page, metrics.x, itemY, metrics.descriptionWidth, px(itemHeight));
   drawTableCell(page, metrics.x + metrics.descriptionWidth, itemY, metrics.quantityWidth, px(itemHeight));
   drawTableCell(page, metrics.x + metrics.descriptionWidth + metrics.quantityWidth, itemY, metrics.priceWidth, px(itemHeight));
   drawTableCell(page, metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth, itemY, metrics.totalWidth, px(itemHeight));
-  drawWrapped(page, description || '-', descriptionX, yTop(top + 30), 8, context.fonts.bold, descriptionMaxWidth, 10, black);
-  drawWrappedLines(page, item.noteLines, descriptionX, yTop(top + 58), 7, context.fonts.regular, descriptionMaxWidth, 9, gray);
-
-  if (item.showValues) {
-    const quantityUnit = `${item.quantity} ${getDocumentItemUnitLabel(item.unit, context.document.language)}`;
-    drawCenteredText(page, quantityUnit, metrics.x + metrics.descriptionWidth + metrics.quantityWidth / 2, itemY + px(itemHeight / 2) - 4, 7, context.fonts.regular, black);
-    drawRightFittedText(page, `${formatRupiah(item.unitPrice)}${item.unit === 'mandays' ? ' / Manday' : ''}`, metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth - px(14), itemY + px(itemHeight / 2) - 4, 8, 5.5, context.fonts.regular, black, metrics.priceWidth - px(24));
-    drawRightFittedText(page, formatRupiah(lineTotal), metrics.x + metrics.width - px(14), itemY + px(itemHeight / 2) - 4, 8, 6, context.fonts.regular, black, metrics.totalWidth - px(24));
-  } else {
-    drawCenteredText(page, '-', metrics.x + metrics.descriptionWidth + metrics.quantityWidth / 2, itemY + px(itemHeight / 2) - 4, 8, context.fonts.regular, gray);
-    drawCenteredText(page, '-', metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth / 2, itemY + px(itemHeight / 2) - 4, 8, context.fonts.regular, gray);
-    drawCenteredText(page, '-', metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth + metrics.totalWidth / 2, itemY + px(itemHeight / 2) - 4, 8, context.fonts.regular, gray);
-  }
+  drawWrapped(page, item.description || '-', descriptionX, yTop(top + 31), 8.5, context.fonts.bold, descriptionMaxWidth, 11, black);
+  drawCenteredText(page, quantityValue, metrics.x + metrics.descriptionWidth + metrics.quantityWidth / 2, itemY + px(itemHeight / 2) - 4, 8, context.fonts.regular, black);
+  drawRightFittedText(page, unitPriceValue, metrics.x + metrics.descriptionWidth + metrics.quantityWidth + metrics.priceWidth - px(14), itemY + px(itemHeight / 2) - 4, 8, 6, context.fonts.regular, black, metrics.priceWidth - px(24));
+  drawRightFittedText(page, formatRupiah(lineTotal), metrics.x + metrics.width - px(14), itemY + px(itemHeight / 2) - 4, 8, 6, context.fonts.bold, black, metrics.totalWidth - px(24));
 
   return top + itemHeight;
+}
+
+function drawScopeHeader(page: PDFPage, context: PdfContext, top: number): number {
+  const left = px(documentLayout.left);
+  const right = pageWidth - px(documentLayout.right);
+  const text = getDocumentText(context.document.language);
+
+  drawText(page, text.scopeOfWork, left, yTop(top + 18), 8, context.fonts.bold, context.accent);
+  page.drawLine({
+    start: { x: left + px(118), y: yTop(top + 15) },
+    end: { x: right, y: yTop(top + 15) },
+    thickness: 0.8,
+    color: lightGray
+  });
+
+  return top + documentLayout.scopeHeaderHeight;
+}
+
+function drawScopeSection(page: PDFPage, context: PdfContext, section: PaginatedDocumentScopeSection, top: number): number {
+  const left = px(documentLayout.left);
+  const contentX = left + px(18);
+  const contentWidth = pageWidth - px(documentLayout.left + documentLayout.right + 32);
+  const isEnglish = context.document.language === 'en';
+  const continuationLabel = isEnglish ? 'Continued from previous page' : 'Lanjutan dari halaman sebelumnya';
+  const title = section.description;
+  let lineTop = top + documentLayout.scopeSectionTopPadding + documentLayout.scopeSectionTitleHeight;
+
+  page.drawRectangle({
+    x: left,
+    y: yTop(top + 4, section.sectionHeight - 8),
+    width: px(3),
+    height: px(section.sectionHeight - 8),
+    color: context.accent
+  });
+
+  drawWrapped(page, title || '-', contentX, yTop(top + 27), 8.5, context.fonts.bold, contentWidth, 11, black);
+
+  if (section.continuation) {
+    drawRightText(page, continuationLabel, pageWidth - px(documentLayout.right), yTop(top + 27), 6.5, context.fonts.bold, context.accent);
+  }
+
+  if (section.continuationContext) {
+    const contextLabel = isEnglish ? 'Continuing section:' : 'Melanjutkan bagian:';
+    drawText(page, contextLabel, contentX, yTop(lineTop + 4), 6.8, context.fonts.regular, gray);
+    drawText(page, section.continuationContext, contentX + px(90), yTop(lineTop + 4), 7.2, context.fonts.bold, black);
+    lineTop += documentLayout.scopeContinuationContextHeight;
+  }
+
+  section.lines.forEach((line) => {
+    const isHeading = line.kind === 'heading';
+    const font = isHeading ? context.fonts.bold : context.fonts.regular;
+    const color = isHeading ? black : gray;
+    const size = isHeading ? 7.7 : 7.2;
+    const markerWidth = px(30);
+
+    if (line.marker) {
+      drawText(page, line.marker, contentX, yTop(lineTop), size, font, color);
+    }
+
+    drawText(page, line.text, contentX + markerWidth, yTop(lineTop), size, font, color);
+    lineTop += line.lineHeight;
+  });
+
+  return top + section.sectionHeight;
+}
+
+function drawScopeSections(page: PDFPage, context: PdfContext, printPage: DocumentPrintPage): number {
+  if (printPage.scopeSections.length === 0) return getPageContentEndTop(printPage);
+
+  let currentTop = drawScopeHeader(page, context, getPageScopeStartTop(printPage));
+
+  printPage.scopeSections.forEach((section, index) => {
+    if (index > 0) currentTop += documentLayout.scopeSectionGap;
+    currentTop = drawScopeSection(page, context, section, currentTop);
+  });
+
+  return currentTop;
 }
 
 function drawSummarySection(page: PDFPage, context: PdfContext, top: number): void {
@@ -400,7 +478,7 @@ function drawFooter(page: PDFPage, context: PdfContext, pageIndex: number): void
 
 function drawDocumentPage(context: PdfContext, printPage: DocumentPrintPage, pageIndex: number): void {
   const page = context.pdf.addPage([pageWidth, pageHeight]);
-  let currentTop = printPage.tableTop + documentLayout.tableHeaderHeight;
+  let currentTop = printPage.tableTop;
 
   context.pages.push(page);
   drawDocumentHeader(page, context, pageIndex);
@@ -409,16 +487,23 @@ function drawDocumentPage(context: PdfContext, printPage: DocumentPrintPage, pag
     drawRecipientAndMeta(page, context);
   }
 
-  if (printPage.showTable) {
+  if (printPage.tableItems.length > 0) {
     drawTableHeader(page, context, printPage.tableTop);
+    currentTop = printPage.tableTop + documentLayout.tableHeaderHeight;
 
-    printPage.items.forEach((item) => {
+    printPage.tableItems.forEach((item) => {
       currentTop = drawTableItem(page, context, item, currentTop);
     });
   }
 
+  if (printPage.scopeSections.length > 0) {
+    currentTop = drawScopeSections(page, context, printPage);
+  }
+
   if (printPage.showSummary) {
-    const summaryTop = printPage.showTable ? getPageTableEndTop(printPage) + documentLayout.summaryGap : documentLayout.summaryOnlyTop;
+    const summaryTop = printPage.tableItems.length === 0 && printPage.scopeSections.length === 0
+      ? documentLayout.summaryOnlyTop
+      : currentTop + documentLayout.summaryGap;
     drawSummarySection(page, context, summaryTop);
   }
 }

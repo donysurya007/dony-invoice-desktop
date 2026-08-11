@@ -1,6 +1,16 @@
 <script lang="ts">
-  import { getDefaultDocumentNote, getDocumentConfig, getDocumentItemUnitLabel, getDocumentText, getPaymentMethodLabel } from '$lib/document-config';
+  import {
+    getDefaultDocumentNote,
+    getDocumentConfig,
+    getDocumentItemUnitLabel,
+    getDocumentQuantityColumnLabel,
+    getDocumentText,
+    getDocumentUnitPriceColumnLabel,
+    getPaymentMethodLabel,
+    shouldShowDocumentItemUnit
+  } from '$lib/document-config';
   import type { CompanySettings, DocumentDraft } from '$lib/types';
+  import type { PaginatedDocumentTableItem } from '$lib/utils/document-pagination';
   import { calculateSubtotal, calculateTotal, formatCurrency, formatDocumentDate } from '$lib/utils/format';
   import { terbilangRupiah } from '$lib/utils/number-to-words';
   import { documentAccentColor, softenHexColor } from '$lib/utils/color';
@@ -20,7 +30,24 @@
   $: companySubtitle = document.language === 'en' ? company.subtitleEn || company.subtitle : company.subtitle;
   $: companyDescription = document.language === 'en' ? company.businessDescriptionEn || company.businessDescription : company.businessDescription;
   $: signerRole = document.language === 'en' ? company.signerRoleEn || company.signerRole : company.signerRole;
+  $: itemUnits = document.items.map((item) => item.unit);
+  $: quantityColumnLabel = getDocumentQuantityColumnLabel(itemUnits, document.language);
+  $: unitPriceColumnLabel = getDocumentUnitPriceColumnLabel(itemUnits, document.language);
+  $: showItemUnit = shouldShowDocumentItemUnit(itemUnits);
 
+  function formatQuantity(item: PaginatedDocumentTableItem): string {
+    if (!showItemUnit) return `${item.quantity}`;
+
+    return `${item.quantity} ${getDocumentItemUnitLabel(item.unit, document.language)}`;
+  }
+
+  function formatUnitPrice(item: PaginatedDocumentTableItem): string {
+    const price = formatCurrency(item.unitPrice);
+
+    if (!showItemUnit || item.unit !== 'mandays') return price;
+
+    return `${price} / Manday`;
+  }
 </script>
 
 <div class="document-preview-pages">
@@ -74,38 +101,74 @@
         </div>
       {/if}
 
-      {#if printPage.showTable}
-        <table class="invoice-table" class:continuation-table={!printPage.showDocumentHeader}>
+      {#if printPage.tableItems.length > 0}
+        <table class="invoice-table compact-invoice-table" class:continuation-table={!printPage.showDocumentHeader}>
           <thead>
             <tr>
               <th>{config.tableDescriptionLabel}</th>
-              <th>{text.quantityUnit}</th>
-              <th>{text.unitPrice}</th>
+              <th>{quantityColumnLabel}</th>
+              <th>{unitPriceColumnLabel}</th>
               <th>{text.total}</th>
             </tr>
           </thead>
           <tbody>
-            {#each printPage.items as item (item.pageItemKey)}
+            {#each printPage.tableItems as item (item.pageItemKey)}
               <tr style={`height: ${item.rowHeight}px`}>
-                <td>
-                  <strong>{item.description || '-'}{item.continuation ? ` — ${document.language === 'en' ? 'continued' : 'lanjutan'}` : ''}</strong>
-                  <div class="paginated-note-lines">
-                    {#each item.noteLines as line}
-                      <p>{line}</p>
-                    {/each}
-                  </div>
-                </td>
-                <td>{item.showValues ? `${item.quantity} ${getDocumentItemUnitLabel(item.unit, document.language)}` : '—'}</td>
-                <td>{item.showValues ? `${formatCurrency(item.unitPrice)}${item.unit === 'mandays' ? ' / Manday' : ''}` : '—'}</td>
-                <td>{item.showValues ? formatCurrency(item.quantity * item.unitPrice) : '—'}</td>
+                <td><strong>{item.description || '-'}</strong></td>
+                <td>{formatQuantity(item)}</td>
+                <td>{formatUnitPrice(item)}</td>
+                <td>{formatCurrency(item.quantity * item.unitPrice)}</td>
               </tr>
             {/each}
           </tbody>
         </table>
       {/if}
 
+      {#if printPage.scopeSections.length > 0}
+        <section class="document-scope">
+          <div class="document-scope-heading">
+            <span>{printPage.scopeSections.some((section) => section.continuation) && printPage.tableItems.length === 0 ? `${text.scopeOfWork} · ${text.continuation}` : text.scopeOfWork}</span>
+            <div></div>
+          </div>
+
+          {#each printPage.scopeSections as section (section.pageSectionKey)}
+            <article class="document-scope-section">
+              <div class="scope-accent"></div>
+              <div class="scope-section-content">
+                <div class="scope-section-title-row">
+                  <strong>{section.description || '-'}</strong>
+                  {#if section.continuation}
+                    <span>{document.language === 'en' ? 'Continued from previous page' : 'Lanjutan dari halaman sebelumnya'}</span>
+                  {/if}
+                </div>
+
+                {#if section.continuationContext}
+                  <div class="scope-continuation-context">
+                    <span>{document.language === 'en' ? 'Continuing section' : 'Melanjutkan bagian'}</span>
+                    <strong>{section.continuationContext}</strong>
+                  </div>
+                {/if}
+
+                <div class="scope-lines">
+                  {#each section.lines as line (line.lineKey)}
+                    <p class:scope-line-heading={line.kind === 'heading'} class:scope-line-bullet={line.kind === 'bullet'}>
+                      {#if line.marker}
+                        <span class="scope-line-marker">{line.marker}</span>
+                      {:else}
+                        <span class="scope-line-marker scope-line-marker-empty"></span>
+                      {/if}
+                      <span>{line.text}</span>
+                    </p>
+                  {/each}
+                </div>
+              </div>
+            </article>
+          {/each}
+        </section>
+      {/if}
+
       {#if printPage.showSummary}
-        <div class="invoice-lower-grid" class:summary-only={!printPage.showTable}>
+        <div class="invoice-lower-grid" class:summary-only={printPage.tableItems.length === 0 && printPage.scopeSections.length === 0}>
           <div class="invoice-box spelled-box">
             <span>{text.amountInWords}</span>
             <strong>{terbilangRupiah(total, document.language)}</strong>

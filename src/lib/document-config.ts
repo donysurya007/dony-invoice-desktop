@@ -27,7 +27,6 @@ export type DocumentText = {
   documentLanguage: string;
   quantity: string;
   itemUnit: string;
-  quantityUnit: string;
   unitPrice: string;
   total: string;
   amountInWords: string;
@@ -36,6 +35,7 @@ export type DocumentText = {
   accountNumber: string;
   accountName: string;
   notes: string;
+  scopeOfWork: string;
   page: string;
   of: string;
 };
@@ -148,7 +148,6 @@ const documentTexts: Record<DocumentLanguage, DocumentText> = {
     documentLanguage: 'Bahasa Dokumen',
     quantity: 'Jumlah',
     itemUnit: 'Satuan',
-    quantityUnit: 'Jumlah / Satuan',
     unitPrice: 'Harga Satuan',
     total: 'Total',
     amountInWords: 'TERBILANG',
@@ -157,6 +156,7 @@ const documentTexts: Record<DocumentLanguage, DocumentText> = {
     accountNumber: 'No. Rekening',
     accountName: 'Nama',
     notes: 'CATATAN',
+    scopeOfWork: 'LINGKUP PEKERJAAN',
     page: 'Halaman',
     of: 'dari'
   },
@@ -171,7 +171,6 @@ const documentTexts: Record<DocumentLanguage, DocumentText> = {
     documentLanguage: 'Document Language',
     quantity: 'Quantity',
     itemUnit: 'Unit',
-    quantityUnit: 'Qty / Unit',
     unitPrice: 'Unit Price',
     total: 'Total',
     amountInWords: 'AMOUNT IN WORDS',
@@ -180,6 +179,7 @@ const documentTexts: Record<DocumentLanguage, DocumentText> = {
     accountNumber: 'Account No.',
     accountName: 'Name',
     notes: 'NOTES',
+    scopeOfWork: 'SCOPE OF WORK',
     page: 'Page',
     of: 'of'
   }
@@ -202,6 +202,30 @@ export function getDocumentItemUnitLabel(unit: DocumentItemUnit, language: Docum
   if (unit === 'mandays') return 'Mandays';
 
   return language === 'en' ? 'Qty' : 'Qty';
+}
+
+function hasOnlyUnit(units: DocumentItemUnit[], unit: DocumentItemUnit): boolean {
+  return units.length > 0 && units.every((itemUnit) => itemUnit === unit);
+}
+
+export function getDocumentQuantityColumnLabel(units: DocumentItemUnit[], language: DocumentLanguage): string {
+  if (hasOnlyUnit(units, 'mandays')) return 'Mandays';
+  if (hasOnlyUnit(units, 'qty')) return 'Qty';
+
+  return language === 'en' ? 'Quantity' : 'Jumlah';
+}
+
+export function getDocumentUnitPriceColumnLabel(units: DocumentItemUnit[], language: DocumentLanguage): string {
+  if (hasOnlyUnit(units, 'mandays')) return language === 'en' ? 'Rate / Manday' : 'Tarif / Manday';
+
+  return language === 'en' ? 'Unit Price' : 'Harga Satuan';
+}
+
+export function shouldShowDocumentItemUnit(units: DocumentItemUnit[]): boolean {
+  if (units.length === 0) return false;
+
+  const firstUnit = units[0];
+  return units.some((unit) => unit !== firstUnit);
 }
 
 export function getPaymentMethodLabel(method: PaymentMethod, language: DocumentLanguage): string {

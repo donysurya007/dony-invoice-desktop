@@ -1,26 +1,43 @@
 import type { DocumentDraft, DocumentItem, DocumentItemUnit } from '$lib/types';
+import { calculateTotal } from './format';
 import { terbilangRupiah } from './number-to-words';
 import { richTextToLines } from './rich-text';
-import { calculateTotal } from './format';
 
-export type PaginatedDocumentItem = {
+export type ScopeLineKind = 'heading' | 'bullet' | 'body';
+
+export type PaginatedScopeLine = {
+  lineKey: string;
+  marker: string;
+  text: string;
+  kind: ScopeLineKind;
+  lineHeight: number;
+};
+
+export type PaginatedDocumentTableItem = {
   pageItemKey: string;
   itemKey: string;
   description: string;
-  noteLines: string[];
   quantity: number;
   unit: DocumentItemUnit;
   unitPrice: number;
-  continuation: boolean;
-  showValues: boolean;
   rowHeight: number;
+};
+
+export type PaginatedDocumentScopeSection = {
+  pageSectionKey: string;
+  itemKey: string;
+  description: string;
+  lines: PaginatedScopeLine[];
+  continuation: boolean;
+  continuationContext: string;
+  sectionHeight: number;
 };
 
 export type DocumentPrintPage = {
   pageKey: string;
-  items: PaginatedDocumentItem[];
+  tableItems: PaginatedDocumentTableItem[];
+  scopeSections: PaginatedDocumentScopeSection[];
   showDocumentHeader: boolean;
-  showTable: boolean;
   showSummary: boolean;
   tableTop: number;
 };
@@ -31,17 +48,24 @@ export const documentLayout = {
   left: 68,
   right: 68,
   firstTableTop: 384,
-  nextTableTop: 148,
+  nextContentTop: 148,
   tableHeaderHeight: 49,
-  tableBottom: 950,
-  summaryGap: 36,
+  tableBottom: 930,
+  tableRowBaseHeight: 62,
+  tableDescriptionChars: 46,
+  tableDescriptionLineHeight: 15,
+  tableScopeGap: 30,
+  scopeHeaderHeight: 34,
+  scopeSectionTopPadding: 18,
+  scopeSectionBottomPadding: 16,
+  scopeSectionTitleHeight: 24,
+  scopeContinuationContextHeight: 24,
+  scopeSectionGap: 16,
+  scopeLineHeight: 15,
+  scopeHeadingLineHeight: 18,
+  scopeChars: 92,
+  summaryGap: 34,
   summaryOnlyTop: 164,
-  minimumRowHeight: 108,
-  rowBaseHeight: 68,
-  descriptionChars: 38,
-  noteChars: 44,
-  noteLineHeight: 16,
-  descriptionLineHeight: 14,
   noteBoxChars: 96
 };
 
@@ -56,8 +80,8 @@ function lineCount(value: string, charsPerLine: number): number {
   return Math.max(1, Math.ceil(clean.length / charsPerLine));
 }
 
-function wrapApprox(value: string, charsPerLine: number): string[] {
-  const clean = (value || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+function splitWords(value: string, charsPerLine: number): string[] {
+  const clean = value.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
   if (!clean) return [];
 
   const words = clean.split(' ');
@@ -88,30 +112,61 @@ function wrapApprox(value: string, charsPerLine: number): string[] {
   }
 
   if (current) lines.push(current);
+
   return lines;
 }
 
-function getWrappedNoteLines(item: DocumentItem): string[] {
+function parseScopeLine(value: string): { marker: string; text: string; kind: ScopeLineKind } {
+  const clean = value.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  const numbered = clean.match(/^(\d+\.)\s+(.*)$/);
+
+  if (numbered) {
+    return { marker: numbered[1], text: numbered[2], kind: 'heading' };
+  }
+
+  const bullet = clean.match(/^[•*-]\s+(.*)$/);
+
+  if (bullet) {
+    return { marker: '•', text: bullet[1], kind: 'bullet' };
+  }
+
+  return { marker: '', text: clean, kind: 'body' };
+}
+
+function wrapScopeLines(item: DocumentItem): PaginatedScopeLine[] {
   const logicalLines = richTextToLines(item.note);
-  const source = logicalLines.length > 0 ? logicalLines : ['-'];
+  const source = logicalLines.length > 0 ? logicalLines : [];
+  const result: PaginatedScopeLine[] = [];
+  let lineIndex = 0;
 
-  return source.flatMap((line) => wrapApprox(line, documentLayout.noteChars));
+  for (const logicalLine of source) {
+    const parsed = parseScopeLine(logicalLine);
+    const markerAllowance = parsed.marker ? parsed.marker.length + 2 : 0;
+    const wrapped = splitWords(parsed.text, Math.max(42, documentLayout.scopeChars - markerAllowance));
+    const lines = wrapped.length > 0 ? wrapped : [''];
+
+    lines.forEach((text, wrappedIndex) => {
+      result.push({
+        lineKey: `${item.itemKey}-scope-line-${lineIndex}`,
+        marker: wrappedIndex === 0 ? parsed.marker : '',
+        text,
+        kind: parsed.kind,
+        lineHeight: parsed.kind === 'heading' ? documentLayout.scopeHeadingLineHeight : documentLayout.scopeLineHeight
+      });
+      lineIndex += 1;
+    });
+  }
+
+  return result;
 }
 
-function getDescriptionHeight(description: string): number {
-  return lineCount(description, documentLayout.descriptionChars) * documentLayout.descriptionLineHeight;
-}
+function tableRowHeight(item: DocumentItem): number {
+  const descriptionLines = lineCount(item.description, documentLayout.tableDescriptionChars);
 
-function rowHeightFor(description: string, noteLineCount: number): number {
   return Math.max(
-    documentLayout.minimumRowHeight,
-    documentLayout.rowBaseHeight + getDescriptionHeight(description) + Math.max(1, noteLineCount) * documentLayout.noteLineHeight
+    documentLayout.tableRowBaseHeight,
+    34 + descriptionLines * documentLayout.tableDescriptionLineHeight
   );
-}
-
-function maxNoteLinesForHeight(description: string, availableHeight: number): number {
-  const fixedHeight = documentLayout.rowBaseHeight + getDescriptionHeight(description);
-  return Math.max(0, Math.floor((availableHeight - fixedHeight) / documentLayout.noteLineHeight));
 }
 
 function estimateNoteHeight(noteText: string): number {
@@ -132,67 +187,161 @@ export function estimateSummaryHeight(document: DocumentDraft, noteText: string)
 function createPage(index: number): DocumentPrintPage {
   return {
     pageKey: `page-${index + 1}`,
-    items: [],
+    tableItems: [],
+    scopeSections: [],
     showDocumentHeader: index === 0,
-    showTable: true,
     showSummary: false,
-    tableTop: index === 0 ? documentLayout.firstTableTop : documentLayout.nextTableTop
+    tableTop: index === 0 ? documentLayout.firstTableTop : documentLayout.nextContentTop
   };
 }
 
-function pageContentTop(page: DocumentPrintPage): number {
-  return page.tableTop + documentLayout.tableHeaderHeight + page.items.reduce((sum, item) => sum + item.rowHeight, 0);
+function hasPageContent(page: DocumentPrintPage): boolean {
+  return page.tableItems.length > 0 || page.scopeSections.length > 0 || page.showSummary;
 }
 
-function pushCurrentPage(pages: DocumentPrintPage[], page: DocumentPrintPage): DocumentPrintPage {
-  pages.push(page);
+function pushPage(pages: DocumentPrintPage[], page: DocumentPrintPage): DocumentPrintPage {
+  if (hasPageContent(page) || page.showDocumentHeader) pages.push(page);
+
   return createPage(pages.length);
 }
 
-function appendItemAcrossPages(pages: DocumentPrintPage[], currentPage: DocumentPrintPage, item: DocumentItem): DocumentPrintPage {
-  let remainingLines = getWrappedNoteLines(item);
-  let continuation = false;
-  let segment = 0;
+export function getPageTableEndTop(page: DocumentPrintPage): number {
+  if (page.tableItems.length === 0) return page.tableTop;
 
-  while (remainingLines.length > 0) {
-    let currentTop = pageContentTop(currentPage);
-    let availableHeight = documentLayout.tableBottom - currentTop;
-    const segmentDescription = continuation ? item.description : item.description;
-    let maxLines = maxNoteLinesForHeight(segmentDescription, availableHeight);
+  return page.tableTop + documentLayout.tableHeaderHeight + page.tableItems.reduce((sum, item) => sum + item.rowHeight, 0);
+}
 
-    if (maxLines < 1 || availableHeight < documentLayout.minimumRowHeight) {
-      currentPage = pushCurrentPage(pages, currentPage);
-      currentTop = pageContentTop(currentPage);
-      availableHeight = documentLayout.tableBottom - currentTop;
-      maxLines = maxNoteLinesForHeight(segmentDescription, availableHeight);
+export function getPageScopeStartTop(page: DocumentPrintPage): number {
+  if (page.tableItems.length > 0) {
+    return getPageTableEndTop(page) + documentLayout.tableScopeGap;
+  }
+
+  return page.tableTop;
+}
+
+function scopeSectionHeight(lines: PaginatedScopeLine[], continuationContext: string): number {
+  const lineHeight = lines.reduce((sum, line) => sum + line.lineHeight, 0);
+  const contextHeight = continuationContext ? documentLayout.scopeContinuationContextHeight : 0;
+
+  return documentLayout.scopeSectionTopPadding + documentLayout.scopeSectionTitleHeight + contextHeight + lineHeight + documentLayout.scopeSectionBottomPadding;
+}
+
+export function getPageContentEndTop(page: DocumentPrintPage): number {
+  if (page.scopeSections.length > 0) {
+    return (
+      getPageScopeStartTop(page) +
+      documentLayout.scopeHeaderHeight +
+      page.scopeSections.reduce((sum, section, index) => sum + section.sectionHeight + (index > 0 ? documentLayout.scopeSectionGap : 0), 0)
+    );
+  }
+
+  if (page.tableItems.length > 0) return getPageTableEndTop(page);
+
+  return page.tableTop;
+}
+
+function canFitTableItem(page: DocumentPrintPage, item: DocumentItem): boolean {
+  const existingTop = page.tableItems.length > 0 ? getPageTableEndTop(page) : page.tableTop + documentLayout.tableHeaderHeight;
+  return existingTop + tableRowHeight(item) <= documentLayout.tableBottom;
+}
+
+function appendTableItems(pages: DocumentPrintPage[], page: DocumentPrintPage, items: DocumentItem[]): DocumentPrintPage {
+  let currentPage = page;
+
+  items.forEach((item) => {
+    if (!canFitTableItem(currentPage, item)) {
+      currentPage = pushPage(pages, currentPage);
     }
 
-    const lineCountForSegment = Math.max(1, Math.min(remainingLines.length, maxLines));
-    const noteLines = remainingLines.slice(0, lineCountForSegment);
-    remainingLines = remainingLines.slice(lineCountForSegment);
-    const rowHeight = Math.min(rowHeightFor(segmentDescription, noteLines.length), availableHeight);
-
-    currentPage.items = [
-      ...currentPage.items,
+    currentPage.tableItems = [
+      ...currentPage.tableItems,
       {
-        pageItemKey: `${item.itemKey}-${segment}`,
+        pageItemKey: `${item.itemKey}-table`,
         itemKey: item.itemKey,
         description: item.description,
-        noteLines,
         quantity: item.quantity,
         unit: item.unit,
         unitPrice: item.unitPrice,
-        continuation,
-        showValues: !continuation,
-        rowHeight
+        rowHeight: tableRowHeight(item)
       }
     ];
+  });
 
-    continuation = true;
-    segment += 1;
+  return currentPage;
+}
 
-    if (remainingLines.length > 0) {
-      currentPage = pushCurrentPage(pages, currentPage);
+function scopeTopForNextSection(page: DocumentPrintPage): number {
+  if (page.scopeSections.length === 0) {
+    return getPageScopeStartTop(page) + documentLayout.scopeHeaderHeight;
+  }
+
+  return getPageContentEndTop(page) + documentLayout.scopeSectionGap;
+}
+
+function takeLinesForAvailableHeight(lines: PaginatedScopeLine[], availableHeight: number, continuationContext: string): PaginatedScopeLine[] {
+  const fixedHeight = documentLayout.scopeSectionTopPadding + documentLayout.scopeSectionTitleHeight + documentLayout.scopeSectionBottomPadding + (continuationContext ? documentLayout.scopeContinuationContextHeight : 0);
+  let usedHeight = fixedHeight;
+  const selected: PaginatedScopeLine[] = [];
+
+  for (const line of lines) {
+    if (usedHeight + line.lineHeight > availableHeight) break;
+    selected.push(line);
+    usedHeight += line.lineHeight;
+  }
+
+  return selected;
+}
+
+function appendScopeSections(pages: DocumentPrintPage[], page: DocumentPrintPage, items: DocumentItem[]): DocumentPrintPage {
+  let currentPage = page;
+
+  for (const item of items) {
+    const allLines = wrapScopeLines(item);
+    let remainingLines = [...allLines];
+    if (remainingLines.length === 0) continue;
+
+    let continuation = false;
+    let segmentIndex = 0;
+    let consumedCount = 0;
+
+    while (remainingLines.length > 0) {
+      const previousHeading = [...allLines.slice(0, consumedCount)].reverse().find((line) => line.kind === 'heading');
+      const startsWithHeading = remainingLines[0]?.kind === 'heading';
+      const continuationContext = continuation && previousHeading && !startsWithHeading
+        ? `${previousHeading.marker} ${previousHeading.text}`.trim()
+        : '';
+      let sectionTop = scopeTopForNextSection(currentPage);
+      let availableHeight = documentLayout.tableBottom - sectionTop;
+      let selected = takeLinesForAvailableHeight(remainingLines, availableHeight, continuationContext);
+
+      if (selected.length === 0) {
+        currentPage = pushPage(pages, currentPage);
+        sectionTop = scopeTopForNextSection(currentPage);
+        availableHeight = documentLayout.tableBottom - sectionTop;
+        selected = takeLinesForAvailableHeight(remainingLines, availableHeight, continuationContext);
+      }
+
+      if (selected.length === 0) selected = [remainingLines[0]];
+
+      currentPage.scopeSections = [
+        ...currentPage.scopeSections,
+        {
+          pageSectionKey: `${item.itemKey}-scope-${segmentIndex}`,
+          itemKey: item.itemKey,
+          description: item.description,
+          lines: selected,
+          continuation,
+          continuationContext,
+          sectionHeight: scopeSectionHeight(selected, continuationContext)
+        }
+      ];
+
+      remainingLines = remainingLines.slice(selected.length);
+      consumedCount += selected.length;
+      continuation = true;
+      segmentIndex += 1;
+
+      if (remainingLines.length > 0) currentPage = pushPage(pages, currentPage);
     }
   }
 
@@ -203,36 +352,29 @@ export function paginateDocument(document: DocumentDraft, noteText: string): Doc
   const pages: DocumentPrintPage[] = [];
   let currentPage = createPage(0);
 
-  for (const item of document.items) {
-    currentPage = appendItemAcrossPages(pages, currentPage, item);
-  }
+  currentPage = appendTableItems(pages, currentPage, document.items);
+  currentPage = appendScopeSections(pages, currentPage, document.items);
 
   const summaryHeight = estimateSummaryHeight(document, noteText);
-  const currentTop = pageContentTop(currentPage);
-  const summaryBottom = currentTop + documentLayout.summaryGap + summaryHeight;
+  const contentEnd = getPageContentEndTop(currentPage);
+  const summaryTop = contentEnd + documentLayout.summaryGap;
 
-  if (summaryBottom <= documentLayout.tableBottom) {
+  if (summaryTop + summaryHeight <= documentLayout.tableBottom) {
     currentPage.showSummary = true;
     pages.push(currentPage);
     return pages;
   }
 
-  if (currentPage.items.length > 0 || pages.length === 0) pages.push(currentPage);
+  if (hasPageContent(currentPage) || currentPage.showDocumentHeader) pages.push(currentPage);
 
   pages.push({
     pageKey: `page-${pages.length + 1}`,
-    items: [],
+    tableItems: [],
+    scopeSections: [],
     showDocumentHeader: false,
-    showTable: false,
     showSummary: true,
-    tableTop: documentLayout.nextTableTop
+    tableTop: documentLayout.summaryOnlyTop
   });
 
   return pages;
-}
-
-export function getPageTableEndTop(page: DocumentPrintPage): number {
-  if (!page.showTable) return documentLayout.summaryOnlyTop;
-
-  return page.tableTop + documentLayout.tableHeaderHeight + page.items.reduce((top, item) => top + item.rowHeight, 0);
 }
